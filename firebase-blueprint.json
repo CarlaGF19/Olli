@@ -1,0 +1,49 @@
+{
+  "entities": {
+    "Meeting": {
+      "title": "Meeting",
+      "description": "An audio recording and its AI transcription and summary",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The unique document ID" },
+        "title": { "type": "string", "description": "Meeting title" },
+        "date": { "type": "string", "format": "date-time", "description": "Timestamp when meeting was captured" },
+        "duration": { "type": "string", "description": "Formatted duration (MM:SS)" },
+        "transcript": { "type": "string", "description": "Full verbatim transcript" },
+        "summary": { "type": "string", "description": "AI-generated structured markdown summary" },
+        "audioMimeType": { "type": "string", "description": "Mime type of the saved audio" },
+        "isFavorite": { "type": "boolean", "description": "Whether pinned/starred" },
+        "audioSizeKb": { "type": "number", "description": "Simulated or actual size of processed audio" },
+        "ownerId": { "type": "string", "description": "UID of the user who owns the meeting notes" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "date", "duration", "transcript", "summary", "ownerId"]
+    },
+    "AppSettings": {
+      "title": "AppSettings",
+      "description": "User specific app configuration",
+      "type": "object",
+      "properties": {
+        "aiProvider": { "type": "string", "enum": ["gemini", "custom_openai"] },
+        "apiKey": { "type": "string" },
+        "audioFolder": { "type": "string" },
+        "autoDeleteAudio": { "type": "boolean" },
+        "ownerId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["aiProvider", "audioFolder", "autoDeleteAudio", "ownerId"]
+    }
+  },
+  "firestore": {
+    "/meetings/{meetingId}": {
+      "schema": "Meeting",
+      "description": "Collection of meeting transcripts"
+    },
+    "/settings/{settingsId}": {
+      "schema": "AppSettings",
+      "description": "Collection of user application settings documents (document ID matches user's UID)"
+    }
+  }
+}

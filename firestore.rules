@@ -1,0 +1,116 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 1. Global Safety Net default catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Reusable, hardened global primitives and helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isEmailVerified() {
+      // Mandate that the email address is verified to protect access limits
+      return isSignedIn() && (request.auth.token.email_verified == true);
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // 2. Validation Blueprints (Anti-Update-Gap)
+    function isValidMeetingUpdate(data) {
+      return data.keys().hasAll(['id', 'title', 'date', 'duration', 'transcript', 'summary', 'ownerId', 'createdAt', 'updatedAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.title is string && data.title.size() <= 256
+        && data.date is string && data.date.size() <= 64
+        && data.duration is string && data.duration.size() <= 16
+        && data.transcript is string && data.transcript.size() <= 200000
+        && data.summary is string && data.summary.size() <= 100000
+        && data.ownerId is string && data.ownerId == request.auth.uid
+        && (!('audioSizeKb' in data) || data.audioSizeKb is int)
+        && (!('audioMimeType' in data) || (data.audioMimeType is string && data.audioMimeType.size() <= 64))
+        && (!('isFavorite' in data) || data.isFavorite is bool)
+        && data.updatedAt == request.time;
+    }
+
+    function isValidMeetingCreate(data) {
+      return isValidMeetingUpdate(data) && data.createdAt == request.time;
+    }
+
+    // AppSettings validation
+    function isValidSettingsUpdate(data) {
+      return data.keys().hasAll(['aiProvider', 'apiKey', 'audioFolder', 'autoDeleteAudio', 'ownerId', 'createdAt', 'updatedAt'])
+        && (data.aiProvider == 'gemini' || data.aiProvider == 'custom_openai')
+        && data.apiKey is string && data.apiKey.size() <= 256
+        && data.audioFolder is string && data.audioFolder.size() <= 256
+        && data.autoDeleteAudio is bool
+        && data.ownerId is string && data.ownerId == request.auth.uid
+        && data.updatedAt == request.time;
+    }
+
+    function isValidSettingsCreate(data) {
+      return isValidSettingsUpdate(data) && data.createdAt == request.time;
+    }
+
+    // 3. Collection Match Rules with Action-Based and Multi-tier Checks
+    match /meetings/{meetingId} {
+      allow get: if isSignedIn() && existing().ownerId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+
+      allow create: if isEmailVerified()
+        && isValidId(meetingId)
+        && isValidMeetingCreate(incoming())
+        && incoming().keys().hasAll(['id', 'title', 'date', 'duration', 'transcript', 'summary', 'ownerId', 'createdAt', 'updatedAt'])
+        && incoming().keys().size() <= 11; // Ensure no hidden shadow keys exist
+
+      allow update: if isEmailVerified()
+        && isValidMeetingUpdate(incoming())
+        && isValidId(meetingId)
+        && incoming().ownerId == existing().ownerId
+        && incoming().id == existing().id
+        && incoming().createdAt == existing().createdAt
+        && (
+          // Action 1: Toggle favorite state changes only
+          (incoming().diff(existing()).affectedKeys().hasOnly(['isFavorite', 'updatedAt'])) ||
+          // Action 2: Update title string only
+          (incoming().diff(existing()).affectedKeys().hasOnly(['title', 'updatedAt'])) ||
+          // Action 3: General save syncing updated paragraphs/verbatims
+          (incoming().diff(existing()).affectedKeys().hasOnly(['title', 'transcript', 'summary', 'updatedAt']))
+        );
+
+      allow delete: if isEmailVerified() && existing().ownerId == request.auth.uid;
+    }
+
+    match /settings/{settingsId} {
+      allow get: if isSignedIn() && settingsId == request.auth.uid;
+      allow list: if isSignedIn() && resource.data.ownerId == request.auth.uid;
+
+      allow create: if isEmailVerified()
+        && settingsId == request.auth.uid
+        && isValidSettingsCreate(incoming())
+        && incoming().keys().hasAll(['aiProvider', 'apiKey', 'audioFolder', 'autoDeleteAudio', 'ownerId', 'createdAt', 'updatedAt'])
+        && incoming().keys().size() == 7;
+
+      allow update: if isEmailVerified()
+        && settingsId == request.auth.uid
+        && isValidSettingsUpdate(incoming())
+        && incoming().ownerId == existing().ownerId
+        && incoming().createdAt == existing().createdAt
+        && incoming().diff(existing()).affectedKeys().hasOnly(['aiProvider', 'apiKey', 'audioFolder', 'autoDeleteAudio', 'updatedAt']);
+
+      allow delete: if isEmailVerified() && settingsId == request.auth.uid;
+    }
+  }
+}
