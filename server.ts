@@ -1,7 +1,8 @@
 import express from "express";
 import path from "path";
+import fs from "fs";
 import dotenv from "dotenv";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 
 // Load environment variables (from .env/process.env)
 dotenv.config();
@@ -90,33 +91,35 @@ Specifically, generate:
 
     const response = await ai.models.generateContent({
       model: "gemini-3.5-flash",
-      contents: [
-        {
-          inlineData: {
-            mimeType: cleanMimeType,
-            data: cleanBase64,
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              mimeType: cleanMimeType,
+              data: cleanBase64,
+            },
           },
-        },
-        {
-          text: userPrompt,
-        },
-      ],
+          {
+            text: userPrompt,
+          },
+        ],
+      },
       config: {
         systemInstruction: systemPrompt,
         responseMimeType: "application/json",
         responseSchema: {
-          type: "OBJECT",
+          type: Type.OBJECT,
           properties: {
             title: {
-              type: "STRING",
+              type: Type.STRING,
               description: "Snappy, clean meeting title, e.g., 'Weekly Standup & Milestone Planning'.",
             },
             transcript: {
-              type: "STRING",
+              type: Type.STRING,
               description: "Full, precise, verbatim transcript of everything spoken in the audio, formatted with detailed chronological [MM:SS] speaker labels.",
             },
             summary: {
-              type: "STRING",
+              type: Type.STRING,
               description: "Fully styled Markdown summary with headings, key insights, bulleted points, and checklist items.",
             },
           },
@@ -150,7 +153,10 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 
 // Configure Vite middleware or static serving
 async function configureServer() {
-  if (process.env.NODE_ENV !== "production") {
+  const distPath = path.join(process.cwd(), "dist");
+  const isProduction = process.env.NODE_ENV === "production" || fs.existsSync(distPath);
+
+  if (!isProduction) {
     // Development mode
     console.log("Configuring development mode with active Vite routing...");
     const { createServer: createViteServer } = await import("vite");
@@ -158,12 +164,11 @@ async function configureServer() {
       server: { middlewareMode: true },
       appType: "spa",
     });
-    app.use(vite.middlewares);
+    app.use(vite.middlewares as any);
   } else {
     // Production static serving
     console.log("Configuring production mode with static direct dist routing...");
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
+    app.use(express.static(distPath) as any);
     app.get("*", (req, res) => {
       res.sendFile(path.join(distPath, "index.html"));
     });
