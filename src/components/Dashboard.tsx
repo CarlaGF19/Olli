@@ -211,72 +211,25 @@ export default function Dashboard({
               );
             })}
 
-            {/* Static fallback demo checklist matching Otter screenshot if meetings list is empty */}
+            {/* Clean empty state if there are truly no meetings */}
             {meetings.length === 0 && (
-              <>
-                {/* Simulated Live Notes Card */}
-                <div className="bg-white rounded-2xl p-5 border border-[#FF4D4F] ring-1 ring-[#FF4D4F]/10 shadow-[0_4px_16px_rgba(255,77,79,0.04)] text-left relative flex flex-col">
-                  <div className="flex items-center gap-1.5 text-[10px] font-bold text-[#FF4D4F] uppercase tracking-wider mb-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#FF4D4F] animate-ping" />
-                    <span>LIVE</span>
-                  </div>
-
-                  <h3 className="text-base font-bold text-[#111111] mb-1.5 font-sans tracking-tight leading-tight">
-                    Note
-                  </h3>
-
-                  <p className="text-[10px] text-[#666666] mb-3 select-none">
-                    7:49 PM • 34 sec • Carla Acha
-                  </p>
-
-                  <div className="flex items-center gap-2 mb-3 bg-[#F4F4F5] p-1.5 rounded-lg w-fit select-none">
-                    <span className="w-4.5 h-4.5 rounded-full bg-slate-200 flex items-center justify-center font-bold text-[8px] text-slate-500">U</span>
-                    <span className="text-[10px] font-bold text-[#333333]">Unknown Speaker</span>
-                  </div>
-
-                  <div className="p-3.5 border-l-2 border-[#FF4D4F] bg-[#F8F9FA] rounded-r-xl text-left select-none">
-                    <p className="text-xs text-[#333333] leading-relaxed italic font-sans font-medium">
-                      "porque una vez que lo intentan y yo luego doy el feedback sobre el enfoque, la respuesta, la metodología, ustedes van a poder interiorizarlo pero si ustedes no participan pero si ustedes."
-                    </p>
-                  </div>
+              <div className="bg-slate-50/50 rounded-2xl p-8 border border-dashed border-slate-200 text-center flex flex-col items-center justify-center min-h-[220px] select-none">
+                <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-400 mb-3.5">
+                  <FileText className="w-6 h-6" />
                 </div>
-
-                {/* Simulated Finished Notes Card */}
-                <div className="bg-white rounded-2xl p-5 border border-[#EBEBEB] text-left relative flex flex-col hover:border-slate-300 transition-colors">
-                  <h3 className="text-base font-bold text-[#111111] mb-1.5 font-sans tracking-tight leading-tight">
-                    Note
-                  </h3>
-
-                  <p className="text-[10px] text-[#666666] mb-3.5 select-none">
-                    7:07 PM • 41 min • Carla Acha
-                  </p>
-
-                  <div className="space-y-2 select-none">
-                    <div className="flex items-center gap-2 text-xs text-[#333333] font-medium leading-relaxed">
-                      <span className="text-[#135bf1] font-black">•</span>
-                      <span>China's Quantum Investment Advantage <span className="text-slate-450 font-mono text-[10px] ml-1">0:15</span></span>
-                    </div>
-
-                    <div className="flex items-center gap-2 text-xs text-[#333333] font-medium leading-relaxed">
-                      <span className="text-[#135bf1] font-black">•</span>
-                      <span>A Threat of Quantum-Driven Identity Fraud <span className="text-slate-450 font-mono text-[10px] ml-1">3:40</span></span>
-                    </div>
-
-                    <div className="flex items-center gap-2 text-xs text-[#333333] font-medium leading-relaxed">
-                      <span className="text-[#135bf1] font-black">•</span>
-                      <span>Quantum Key Distribution Device Overview <span className="text-slate-450 font-mono text-[10px] ml-1">5:52</span></span>
-                    </div>
-
-                    {/* Disclosure trigger */}
-                    <button
-                      onClick={() => setActiveTab("recorder")}
-                      className="text-xs font-bold text-[#135bf1] hover:underline mt-2 inline-block select-none cursor-pointer"
-                    >
-                      Show more
-                    </button>
-                  </div>
-                </div>
-              </>
+                <h3 className="text-sm font-bold text-[#111111] mb-1">
+                  Tu bandeja de notas está vacía
+                </h3>
+                <p className="text-xs text-slate-500 max-w-sm mb-4 leading-normal">
+                  No tienes ninguna reunión guardada en este espacio de trabajo. Comienza a grabar o importa un archivo para transcribir.
+                </p>
+                <button
+                  onClick={() => setActiveTab("recorder")}
+                  className="px-4 py-2 bg-[#135bf1] hover:bg-[#0746cc] text-white font-bold text-xs rounded-xl transition-all cursor-pointer shadow-xs active:scale-95"
+                >
+                  Record first meeting
+                </button>
+              </div>
             )}
 
           </div>
