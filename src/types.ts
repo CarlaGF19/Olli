@@ -20,6 +20,7 @@ export interface Meeting {
   audioMimeType?: string;
   isFavorite?: boolean;
   audioSizeKb?: number;
+  isDraft?: boolean;
 }
 
 export interface AppSettings {
@@ -27,4 +28,5 @@ export interface AppSettings {
   apiKey: string;
   audioFolder: string;
   autoDeleteAudio: boolean;
+  bypassSizeLimit?: boolean;
 }

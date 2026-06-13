@@ -99,6 +99,7 @@ export default function App() {
     apiKey: "AQ.Ab8RN6L409A8VsqFzDtEg2eDDP_PnLFxXNGC_ox6-yAgOHO-vQ",
     audioFolder: "/MeetingBrain/Vault/",
     autoDeleteAudio: true,
+    bypassSizeLimit: false,
   });
 
   // Mobile menu control toggler
@@ -158,15 +159,9 @@ export default function App() {
           setMeetings(cloudMeetings);
           setSelectedMeeting(cloudMeetings[0]);
         } else {
-          // New workspace database - sync initialized seeding templates
-          for (const m of INITIAL_DEMO_MEETINGS) {
-            await saveMeetingToCloud(user.uid, m);
-          }
-          const updatedCloud = await fetchUserMeetings(user.uid);
-          setMeetings(updatedCloud);
-          if (updatedCloud.length > 0) {
-            setSelectedMeeting(updatedCloud[0]);
-          }
+          // New workspace database - start completely clean with no files or mock items
+          setMeetings([]);
+          setSelectedMeeting(null);
         }
       } catch (err) {
         console.error("Error loading cloud meetings:", err);
@@ -202,7 +197,7 @@ export default function App() {
 
   // Add a newly recorded/uploaded meeting transcript
   const handleAddNewMeeting = async (
-    transcriptionData: { title: string; transcript: string; summary: string },
+    transcriptionData: { id?: string; title: string; transcript: string; summary: string; isDraft?: boolean },
     durationSec: number
   ) => {
     const formattedDuration = () => {
@@ -211,8 +206,10 @@ export default function App() {
       return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
     };
 
+    const targetId = transcriptionData.id || "meeting_" + Date.now();
+
     const newMeeting: Meeting = {
-      id: "meeting_" + Date.now(),
+      id: targetId,
       title: transcriptionData.title || "Acoustic Voice Note",
       date: new Date().toISOString(),
       duration: formattedDuration(),
@@ -220,10 +217,20 @@ export default function App() {
       summary: transcriptionData.summary,
       isFavorite: false,
       audioSizeKb: Math.round(durationSec * 32) || 120, // simulate storage footprint
+      isDraft: transcriptionData.isDraft ?? false,
     };
 
-    // Fast layout render UI feedback
-    setMeetings((prev) => [newMeeting, ...prev]);
+    // Fast layout render UI feedback: replace draft if it matches or prepends
+    setMeetings((prev) => {
+      const idx = prev.findIndex((m) => m.id === targetId);
+      if (idx !== -1) {
+        const copy = [...prev];
+        copy[idx] = newMeeting;
+        return copy;
+      } else {
+        return [newMeeting, ...prev];
+      }
+    });
     setSelectedMeeting(newMeeting);
     setActiveTab("meetings");
 
@@ -232,6 +239,48 @@ export default function App() {
         await saveMeetingToCloud(user.uid, newMeeting);
       } catch (err) {
         console.error("Failed to save meeting with Cloud:", err);
+      }
+    }
+  };
+
+  // Save or update real-time draft in parent state and Cloud
+  const handleUpdateMeetingDraft = async (draftData: {
+    id: string;
+    title: string;
+    transcript: string;
+    summary: string;
+    duration: string;
+    isDraft?: boolean;
+    date?: string;
+  }) => {
+    const draftMeeting: Meeting = {
+      id: draftData.id,
+      title: draftData.title,
+      date: draftData.date || new Date().toISOString(),
+      duration: draftData.duration,
+      transcript: draftData.transcript,
+      summary: draftData.summary,
+      isFavorite: false,
+      audioSizeKb: 140,
+      isDraft: true,
+    };
+
+    setMeetings((prev) => {
+      const idx = prev.findIndex((m) => m.id === draftData.id);
+      if (idx !== -1) {
+        const copy = [...prev];
+        copy[idx] = { ...copy[idx], ...draftMeeting };
+        return copy;
+      } else {
+        return [draftMeeting, ...prev];
+      }
+    });
+
+    if (user) {
+      try {
+        await saveMeetingToCloud(user.uid, draftMeeting);
+      } catch (err) {
+        console.error("Failed to sync background draft to cloud:", err);
       }
     }
   };
@@ -301,6 +350,29 @@ export default function App() {
         await updateMeetingInCloud(user.uid, id, { title: newTitle });
       } catch (err) {
         console.error("Failed to update title to Cloud:", err);
+      }
+    }
+  };
+
+  const handleUpdateMeeting = async (id: string, updatedFields: Partial<Meeting>) => {
+    const updated = meetings.map((m) => {
+      if (m.id === id) {
+        return { ...m, ...updatedFields };
+      }
+      return m;
+    });
+    setMeetings(updated);
+
+    // Sync active selection
+    if (selectedMeeting?.id === id) {
+      setSelectedMeeting((prev) => (prev ? { ...prev, ...updatedFields } : null));
+    }
+
+    if (user) {
+      try {
+        await updateMeetingInCloud(user.uid, id, updatedFields);
+      } catch (err) {
+        console.error("Failed to update fields to Cloud:", err);
       }
     }
   };
@@ -432,6 +504,7 @@ export default function App() {
                   <AudioRecorder
                     onTranscriptionSuccess={handleAddNewMeeting}
                     settings={settings}
+                    onUpdateDraft={handleUpdateMeetingDraft}
                   />
                 </div>
               )}
@@ -444,6 +517,7 @@ export default function App() {
                   onDeleteMeeting={handleDeleteMeeting}
                   onToggleFavorite={handleToggleFavorite}
                   onUpdateMeetingTitle={handleUpdateMeetingTitle}
+                  onUpdateMeeting={handleUpdateMeeting}
                 />
               )}
 

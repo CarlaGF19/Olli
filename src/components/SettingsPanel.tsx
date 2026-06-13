@@ -29,6 +29,7 @@ export default function SettingsPanel({ settings, onSaveSettings }: SettingsPane
   const [apiKey, setApiKey] = useState(settings.apiKey);
   const [audioFolder, setAudioFolder] = useState(settings.audioFolder);
   const [autoDeleteAudio, setAutoDeleteAudio] = useState(settings.autoDeleteAudio);
+  const [bypassSizeLimit, setBypassSizeLimit] = useState(settings.bypassSizeLimit ?? false);
   
   const [showStatus, setShowStatus] = useState(false);
 
@@ -39,6 +40,7 @@ export default function SettingsPanel({ settings, onSaveSettings }: SettingsPane
       apiKey,
       audioFolder,
       autoDeleteAudio,
+      bypassSizeLimit,
     });
     
     setShowStatus(true);
@@ -208,6 +210,33 @@ export default function SettingsPanel({ settings, onSaveSettings }: SettingsPane
             <div
               className={`bg-white w-5 h-5 rounded-full transition-transform shadow-xs ${
                 autoDeleteAudio ? "translate-x-4" : "translate-x-0"
+              }`}
+            />
+          </button>
+        </div>
+
+        {/* Payload Limit Bypasser */}
+        <div className="p-4 bg-amber-50/20 border border-amber-200/30 rounded-2xl flex items-center justify-between">
+          <div className="max-w-md pr-4">
+            <span className="text-xs font-bold text-amber-900 flex items-center gap-1.5">
+              Desactivar límites de tamaño de audio (Local / VPS / Cloud Run)
+            </span>
+            <span className="text-[10px] text-slate-500 block mt-0.5 leading-relaxed">
+              Si ejecutas de forma local, en Cloud Run o en un servidor dedicado VPS, no existe el límite de 4.5 MB de Vercel Serverless. Activa esta opción para eliminar la restricción y procesar grabaciones pesadas de hasta 100 MB.
+            </span>
+          </div>
+
+          {/* Styled ios-like checkbox toggle */}
+          <button
+            type="button"
+            onClick={() => setBypassSizeLimit(!bypassSizeLimit)}
+            className={`w-10 h-6 shrink-0 rounded-full transition-colors flex items-center p-0.5 cursor-pointer ${
+              bypassSizeLimit ? "bg-amber-600" : "bg-slate-200"
+            }`}
+          >
+            <div
+              className={`bg-white w-5 h-5 rounded-full transition-transform shadow-xs ${
+                bypassSizeLimit ? "translate-x-4" : "translate-x-0"
               }`}
             />
           </button>

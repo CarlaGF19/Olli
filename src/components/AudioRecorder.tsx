@@ -4,15 +4,17 @@
  */
 
 import React, { useState, useRef, useEffect } from "react";
-import { Mic, Square, Play, Pause, UploadCloud, FileAudio, AlertCircle, Sparkles, Brain, Tv, Volume2 } from "lucide-react";
+import { Mic, Square, Play, Pause, UploadCloud, FileAudio, AlertCircle, Sparkles, Brain, Tv, Volume2, FileDown, Check } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { jsPDF } from "jspdf";
 
 interface AudioRecorderProps {
-  onTranscriptionSuccess: (transcription: { title: string; transcript: string; summary: string }, durationSec: number) => void;
-  settings: { aiProvider: string; apiKey: string };
+  onTranscriptionSuccess: (transcription: { id?: string; title: string; transcript: string; summary: string }, durationSec: number) => void;
+  settings: { aiProvider: string; apiKey: string; bypassSizeLimit?: boolean };
+  onUpdateDraft?: (draft: { id: string; title: string; transcript: string; summary: string; duration: string; isDraft?: boolean; date?: string }) => void;
 }
 
-export default function AudioRecorder({ onTranscriptionSuccess, settings }: AudioRecorderProps) {
+export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpdateDraft }: AudioRecorderProps) {
   // Tabs: "record" or "upload"
   const [activeMode, setActiveMode] = useState<"record" | "upload">("record");
 
@@ -26,6 +28,11 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings }: Audi
   const [captureSource, setCaptureSource] = useState<"mic" | "screen">("mic");
   const [isFirefox, setIsFirefox] = useState(false);
   const [isSafari, setIsSafari] = useState(false);
+  
+  // Dynamic Live Draft ID and sync state
+  const currentDraftIdRef = useRef<string | null>(null);
+  const [isSyncingDraft, setIsSyncingDraft] = useState(false);
+  const [draftWordCount, setDraftWordCount] = useState(0);
 
   useEffect(() => {
     if (typeof window !== "undefined" && navigator.userAgent) {
@@ -169,8 +176,24 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings }: Audi
     liveTranscriptRef.current = "";
     setLiveTranscript("");
     setInterimTranscript("");
+    setDraftWordCount(0);
     setFailedSessionData(null);
     audioChunksRef.current = [];
+
+    // Initialize the live draft session
+    const draftId = "draft_" + Date.now();
+    currentDraftIdRef.current = draftId;
+    if (onUpdateDraft) {
+      onUpdateDraft({
+        id: draftId,
+        title: `Borrador en Vivo: ${new Date().toLocaleDateString()} a las ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+        transcript: "(Esperando voz...)",
+        summary: "### Borrador Guardado en Tiempo Real\n\nEste es un borrador auto-guardado mientras hablabas. Si la transcripción del audio pesado falla, puedes usar la opción de IA para resumir este borrador de texto directamente en tu bóveda.",
+        duration: "00:00",
+        isDraft: true,
+        date: new Date().toISOString()
+      });
+    }
 
     try {
       let stream: MediaStream;
@@ -297,6 +320,28 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings }: Audi
           setLiveTranscript(fullText);
           liveTranscriptRef.current = fullText;
           setInterimTranscript(currentInterim);
+
+          const wordCount = fullText.trim().split(/\s+/).filter(Boolean).length;
+          setDraftWordCount(wordCount);
+
+          if (onUpdateDraft && currentDraftIdRef.current) {
+            setIsSyncingDraft(true);
+            const m = Math.floor(duration / 60);
+            const s = duration % 60;
+            const liveDurationFormatted = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+            onUpdateDraft({
+              id: currentDraftIdRef.current,
+              title: `Borrador en Vivo: ${new Date().toLocaleDateString()} a las ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+              transcript: fullText,
+              summary: "### Borrador Guardado en Tiempo Real\n\nEste es un borrador auto-guardado mientras hablabas. Si la transcripción del audio pesado falla, puedes usar la opción de IA para resumir este borrador de texto directamente en tu bóveda.",
+              duration: liveDurationFormatted,
+              isDraft: true,
+              date: new Date().toISOString()
+            });
+            setTimeout(() => {
+              setIsSyncingDraft(false);
+            }, 500);
+          }
         };
 
         recognition.onerror = (e: any) => {
@@ -325,7 +370,28 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings }: Audi
 
       // Setup active ticking counter
       timerIntervalRef.current = setInterval(() => {
-        setDuration((prev) => prev + 1);
+        setDuration((prev) => {
+          const next = prev + 1;
+          if (next % 5 === 0 && onUpdateDraft && currentDraftIdRef.current) {
+            setIsSyncingDraft(true);
+            const m = Math.floor(next / 60);
+            const s = next % 60;
+            const liveDurationFormatted = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+            onUpdateDraft({
+              id: currentDraftIdRef.current,
+              title: `Borrador en Vivo: ${new Date().toLocaleDateString()} a las ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+              transcript: liveTranscriptRef.current || "(Silencio grabado...)",
+              summary: "### Borrador Guardado en Tiempo Real\n\nEste es un borrador auto-guardado mientras hablabas. Si la transcripción del audio pesado falla, puedes usar la opción de IA para resumir este borrador de texto directamente en tu bóveda.",
+              duration: liveDurationFormatted,
+              isDraft: true,
+              date: new Date().toISOString()
+            });
+            setTimeout(() => {
+              setIsSyncingDraft(false);
+            }, 500);
+          }
+          return next;
+        });
       }, 1000);
 
     } catch (err: any) {
@@ -405,8 +471,14 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings }: Audi
 
       // Proactively check audio size in client to avoid Vercel Serverless maximum 4.5MB payload limitations before sending
       const payloadSizeBytes = base64Data.length;
-      if (payloadSizeBytes > 4.2 * 1024 * 1024) {
-        throw new Error(`El audio grabado es demasiado pesado (${(payloadSizeBytes / (1024 * 1024)).toFixed(2)} MB). Las funciones Serverless de Vercel limitan las transferencias de subida a un máximo de 4.5 MB. Te sugerimos realizar grabaciones más cortas (menos de 8-10 minutos) o dividir tu sesión.`);
+      const isBypassed = !!settings.bypassSizeLimit;
+      const limitMb = isBypassed ? 100 : 4.2;
+      if (payloadSizeBytes > limitMb * 1024 * 1024) {
+        if (isBypassed) {
+          throw new Error(`El audio grabado superó incluso el límite máximo de 100 MB para entornos locales/VPS (${(payloadSizeBytes / (1024 * 1024)).toFixed(2)} MB). Intenta dividir tu grabación o sesión.`);
+        } else {
+          throw new Error(`El audio grabado es demasiado pesado (${(payloadSizeBytes / (1024 * 1024)).toFixed(2)} MB). Las funciones Serverless de Vercel limitan las transferencias de subida a un máximo de 4.5 MB. Te sugerimos realizar grabaciones más cortas o activar 'Desactivar límites de tamaño de audio' en Settings si corres localmente, en VPS o en Cloud Run.`);
+        }
       }
 
       // 2. Call local `/api/transcribe` backend endpoint or direct client call
@@ -560,7 +632,10 @@ Specifically, generate:
       }
 
       setProcessingStatus("Generando resumen ejecutivo y tareas de Obsidian...");
-      onTranscriptionSuccess(json, durationSec);
+      onTranscriptionSuccess({
+        ...json,
+        id: currentDraftIdRef.current || undefined
+      }, durationSec);
 
     } catch (err: any) {
       console.error("Transcription error details:", err);
@@ -633,6 +708,78 @@ Specifically, generate:
     }
   };
 
+  const downloadLivePDF = () => {
+    const textToPrint = liveTranscriptRef.current || liveTranscript || "(Sin palabras transcritas aún)";
+    const doc = new jsPDF({
+      orientation: "portrait",
+      unit: "mm",
+      format: "a4",
+    });
+
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 20;
+    const maxLineWidth = pageWidth - (margin * 2);
+
+    let yPosition = 25;
+
+    const drawPageBackground = () => {
+      // Top accent bar overlay
+      doc.setFillColor(44, 94, 173); // #2C5EAD
+      doc.rect(0, 0, pageWidth, 4, "F");
+
+      // Footer
+      doc.setFont("Helvetica", "normal");
+      doc.setFontSize(8);
+      doc.setTextColor(150, 150, 150);
+      doc.text(`Grabación Sincronizada en Vivo  |  MeetingBrain`, margin, pageHeight - 10);
+      const pageNum = doc.getNumberOfPages();
+      doc.text(`Pág. ${pageNum}`, pageWidth - margin - 15, pageHeight - 10);
+    };
+
+    drawPageBackground();
+
+    // Title
+    doc.setFont("Helvetica", "bold");
+    doc.setFontSize(18);
+    doc.setTextColor(26, 37, 58);
+    doc.text(`Borrador Transcrito en Tiempo Real`, margin, yPosition);
+    yPosition += 10;
+
+    // Metadata
+    doc.setFont("Helvetica", "normal");
+    doc.setFontSize(10);
+    doc.setTextColor(120, 120, 120);
+    const m = Math.floor(duration / 60);
+    const s = duration % 60;
+    const liveDurationFormatted = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    doc.text(`Fecha: ${new Date().toLocaleDateString()} a las ${new Date().toLocaleTimeString()}  |  Duración de Audio: ${liveDurationFormatted}`, margin, yPosition);
+    yPosition += 12;
+
+    // Line separator
+    doc.setDrawColor(230, 230, 230);
+    doc.line(margin, yPosition, pageWidth - margin, yPosition);
+    yPosition += 10;
+
+    // Body text
+    doc.setFont("Helvetica", "normal");
+    doc.setFontSize(11);
+    doc.setTextColor(60, 60, 60);
+
+    const textLines = doc.splitTextToSize(textToPrint, maxLineWidth);
+    for (const line of textLines) {
+      if (yPosition > pageHeight - margin - 10) {
+        doc.addPage();
+        drawPageBackground();
+        yPosition = 25;
+      }
+      doc.text(line, margin, yPosition);
+      yPosition += 6.5;
+    }
+
+    doc.save(`MeetingBrain_Borrador_Sincronizado_${Date.now()}.pdf`);
+  };
+
   const formatTimer = (totalSeconds: number) => {
     const hrs = Math.floor(totalSeconds / 3600);
     const mins = Math.floor((totalSeconds % 3600) / 60);
@@ -652,6 +799,19 @@ Specifically, generate:
       {/* Background Gradients */}
       <div className="absolute -top-24 -right-24 w-64 h-64 bg-[#C4E2F5] blur-[80px] opacity-30 pointer-events-none"></div>
       <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-[#4BB8FA] blur-[80px] opacity-15 pointer-events-none"></div>
+
+      {/* Local Unlimited Recording Mode Alert Banner */}
+      {settings.bypassSizeLimit && (
+        <div className="mb-6 p-4 bg-emerald-50 border border-emerald-100 rounded-2xl flex items-start space-x-3 text-emerald-800 text-xs relative z-10 shadow-xs">
+          <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0 mt-1"></div>
+          <div className="flex-1 text-left leading-relaxed">
+            <span className="font-bold">⚠️ Modo Local Activo (Sin Límites de Peso)</span>
+            <p className="mt-0.5 text-emerald-700">
+              Estás grabando en modo sin límites. No se aplicará la restricción típica de 4.5 MB de la nube, permitiendo procesar sesiones largas de hasta 100 MB.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Tab Selectors */}
       <div className="flex border-b border-slate-100/80 mb-8 relative z-10">
@@ -732,9 +892,10 @@ Specifically, generate:
                     type="button"
                     onClick={() => {
                       onTranscriptionSuccess({
+                        id: currentDraftIdRef.current || undefined,
                         title: `Respaldo: Conversación ${new Date().toLocaleDateString()}`,
                         transcript: failedSessionData.transcript,
-                        summary: `### Transcripción en Vivo de Respaldo\n\nEsta nota se recuperó de forma segura de tu sesión en tiempo real.\n\n${failedSessionData.transcript}`
+                        summary: `### Transcripción en Vivo de Respaldo\n\nEsta nota se recuperó de forma segura de tu sesión en tiempo real. ¡Puedes resumirla con Inteligencia Artificial haciendo clic en 'Resumir Borrador con IA'!\n\n${failedSessionData.transcript}`
                       }, failedSessionData.durationSec);
                       setFailedSessionData(null);
                       setErrorMessage("");
@@ -908,7 +1069,7 @@ Specifically, generate:
                 {/* 🔴 LIVE TRANSCRIPTION PANEL */}
                 <div className="w-full max-w-md bg-slate-50 border border-slate-100/80 rounded-2xl p-4 mb-6 relative overflow-hidden flex flex-col items-start text-left shadow-inner">
                   <div className="flex items-center space-x-2 text-[10px] font-bold text-rose-500 uppercase tracking-widest mb-2.5">
-                    <span className="w-1.5.5 h-1.5.5 rounded-full bg-rose-500 animate-pulse inline-block" style={{ width: "6px", height: "6px" }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse inline-block" style={{ width: "6px", height: "6px" }} />
                     <span>Transcripción en Vivo Transmitiendo</span>
                   </div>
                   
@@ -925,6 +1086,23 @@ Specifically, generate:
                         Hable claramente para ver la transcripción en vivo en español...
                       </div>
                     )}
+                  </div>
+
+                  {/* Live Sync and PDF generation toolbar */}
+                  <div className="w-full mt-3 pt-3 border-t border-slate-100/80 flex items-center justify-between text-[11px] text-slate-500 font-medium">
+                    <div className="flex items-center space-x-1.5 text-emerald-600 font-semibold">
+                      <Check className="w-3.5 h-3.5 stroke-[3px]" />
+                      <span className="animate-pulse">{isSyncingDraft ? "Autoguardando Bóveda..." : "Sincronizado con PDF"}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={downloadLivePDF}
+                      disabled={!liveTranscript && !interimTranscript}
+                      className="inline-flex items-center space-x-1 px-2.5 py-1 bg-[#2C5EAD] hover:bg-[#1591DC] text-white rounded-lg text-[10px] font-bold transition-all shadow-xs cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <FileDown className="w-3 h-3" />
+                      <span>Recuperar PDF (.pdf)</span>
+                    </button>
                   </div>
                 </div>
 
