@@ -12,9 +12,11 @@ interface OnboardingScreenProps {
   user: User;
   onSaveApiKey: (apiKey: string) => Promise<void>;
   onLogout: () => void;
+  showSkip?: boolean;
+  onSkip?: () => void;
 }
 
-export default function OnboardingScreen({ user, onSaveApiKey, onLogout }: OnboardingScreenProps) {
+export default function OnboardingScreen({ user, onSaveApiKey, onLogout, showSkip, onSkip }: OnboardingScreenProps) {
   const [apiKey, setApiKey] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
@@ -174,26 +176,38 @@ export default function OnboardingScreen({ user, onSaveApiKey, onLogout }: Onboa
               <span>Salir</span>
             </button>
 
-            <button
-              type="submit"
-              disabled={isSubmitting}
-              className="px-6 py-2.5 bg-[#135bf1] hover:bg-[#0746cc] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-indigo-100 active:scale-95 disabled:opacity-50 cursor-pointer"
-            >
-              {isSubmitting ? (
-                <>
-                  <svg className="animate-spin h-4.5 w-4.5 text-white" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  <span>Verificando y Guardando...</span>
-                </>
-              ) : (
-                <>
-                  <UserCheck className="w-3.5 h-3.5" />
-                  <span>Activar mi Cuenta</span>
-                </>
+            <div className="flex items-center gap-2">
+              {showSkip && onSkip && (
+                <button
+                  type="button"
+                  onClick={onSkip}
+                  className="px-4 py-2.5 rounded-xl border border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-600 text-xs font-bold transition-all cursor-pointer"
+                >
+                  Omitir / Skip
+                </button>
               )}
-            </button>
+
+              <button
+                type="submit"
+                disabled={isSubmitting}
+                className="px-6 py-2.5 bg-[#135bf1] hover:bg-[#0746cc] text-white text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all shadow-md shadow-indigo-100 active:scale-95 disabled:opacity-50 cursor-pointer"
+              >
+                {isSubmitting ? (
+                  <>
+                    <svg className="animate-spin h-4.5 w-4.5 text-white" fill="none" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    <span>Verificando y Guardando...</span>
+                  </>
+                ) : (
+                  <>
+                    <UserCheck className="w-3.5 h-3.5" />
+                    <span>Activar mi Cuenta</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </form>
       </motion.div>

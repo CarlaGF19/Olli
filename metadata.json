@@ -1,6 +1,6 @@
 {
   "name": "MeetingBrain",
-  "description": "A modern workspaces meeting manager. Record and transcribe audio with automatic Obsidian-style summaries powered by Gemini AI, inspired by Otter.ai, Notion, and Obsidian.",
+  "description": "A modern workspaces meeting manager. Record and transcribe audio with automatic structured summaries powered by Gemini AI, inspired by privacy-first tools.",
   "requestFramePermissions": ["microphone"],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

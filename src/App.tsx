@@ -24,7 +24,7 @@ import {
   deleteUserAccountFromCloud
 } from "./lib/db";
 
-// 1. Pristine demo meetings seeding standard Obsidian outputs
+// 1. Pristine demo meetings seeding standard structured outputs
 const INITIAL_DEMO_MEETINGS: Meeting[] = [
   {
     id: "demo-meeting-1",
@@ -63,7 +63,7 @@ Alignment sync validating current visual interfaces and the AI engine deployment
     duration: "08:42",
     isFavorite: false,
     audioSizeKb: 2840,
-    transcript: `Marcus: Welcome to the design critique. Today we are mapping the workspace navigation layouts. We want simple Obsidian sidebar panels paired with custom Notion bento grids.
+    transcript: `Marcus: Welcome to the design critique. Today we are mapping the workspace navigation layouts. We want simple sidebar panels paired with custom bento grids.
 Alexis: I agree. Let's use ultra-rounded borders and soft slate color margins to communicate calm and focus, avoiding purple gradients.
 Marcus: Yes, the focus must be the document space itself. The sidebar shouldn't distract the writer. When a meeting notes note is opened, users should easily slide between verbatim transcripts and clean Markdown chapters.
 Alexis: That is gold. Let's make sure checklist tasks in summaries display as clickable checkmark inputs for user edits.
@@ -72,7 +72,7 @@ Marcus: Perfect. Let's implement these spacing principles in our main React fram
 **Date**: June 10, 2026 | **Duration**: 08:42 | **Lead**: Marcus Vance
 
 ### Aesthetic Philosophy
-Creating a focused document workspace inspired by Arc Browser, Notion, and Obsidian. No flashy noise, high-contrast layouts, with generous white spaces.
+Creating a focused document workspace inspired by Arc Browser and minimalist document editors. No flashy noise, high-contrast layouts, with generous white spaces.
 
 ### UX Alignment
 - **Dual-Pane Folder Explorer**: Sidebar lists on left panels, editing canvases on right panels.
@@ -81,7 +81,7 @@ Creating a focused document workspace inspired by Arc Browser, Notion, and Obsid
 
 ### Action Items
 - [x] Define Poppins font styles across body headings - **Marcus**
-- [ ] Mount clean scrollbars matching Notion frames - **Team**
+- [ ] Mount clean scrollbars matching workspace frames - **Team**
 - [ ] Connect interactive checkbox toggles in Markdown panels - **Marcus**`,
   }
 ];
@@ -104,6 +104,10 @@ export default function App() {
     bypassSizeLimit: false,
   });
 
+  // Track onboarding skip status and logins/visit count
+  const [onboardingSkipped, setOnboardingSkipped] = useState<boolean>(false);
+  const [visitCount, setVisitCount] = useState<number>(1);
+
   // Mobile menu control toggler
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
@@ -111,9 +115,42 @@ export default function App() {
   useEffect(() => {
     const savedUser = localStorage.getItem("mb_user");
     if (savedUser) {
-      setUser(JSON.parse(savedUser));
+      const parsedUser = JSON.parse(savedUser);
+      setUser(parsedUser);
+      
+      // Load initial skipped state and visits for restored session
+      const visitedKey = `onboarding_visits_v1_${parsedUser.uid}`;
+      const savedVisits = parseInt(localStorage.getItem(visitedKey) || "0", 10);
+      const isSkipped = localStorage.getItem(`onboarding_skipped_v1_${parsedUser.uid}`) === "true";
+      setOnboardingSkipped(isSkipped);
+      setVisitCount(savedVisits);
     }
   }, []);
+
+  // Update visits when user logs/re-logs in
+  useEffect(() => {
+    if (user) {
+      const visitKey = `onboarding_visits_v1_${user.uid}`;
+      const savedVisits = parseInt(localStorage.getItem(visitKey) || "0", 10);
+      
+      const skippedStatus = localStorage.getItem(`onboarding_skipped_v1_${user.uid}`) === "true";
+      setOnboardingSkipped(skippedStatus);
+
+      if (savedVisits === 0) {
+        // First entry
+        localStorage.setItem(visitKey, "1");
+        setVisitCount(1);
+      } else {
+        // Second entry or more
+        const nextVisits = savedVisits + 1;
+        localStorage.setItem(visitKey, nextVisits.toString());
+        setVisitCount(nextVisits);
+      }
+    } else {
+      setOnboardingSkipped(false);
+      setVisitCount(1);
+    }
+  }, [user]);
 
   // 2. Load settings and meeting records from cloud Firestore whenever the user alters
   useEffect(() => {
@@ -400,11 +437,16 @@ export default function App() {
     return <LoginRegister onLoginSuccess={handleLoginSuccess} />;
   }
 
-  // Enforce onboarding / first setup if user has no API Key configured
-  if (!settings.apiKey || settings.apiKey.trim() === "") {
+  // Enforce onboarding / first setup if user has no API Key configured and has not skipped
+  if ((!settings.apiKey || settings.apiKey.trim() === "") && !onboardingSkipped) {
     return (
       <OnboardingScreen
         user={user}
+        showSkip={visitCount > 1}
+        onSkip={() => {
+          setOnboardingSkipped(true);
+          localStorage.setItem(`onboarding_skipped_v1_${user.uid}`, "true");
+        }}
         onSaveApiKey={async (key) => {
           const updatedSettings = { ...settings, apiKey: key };
           setSettings(updatedSettings);

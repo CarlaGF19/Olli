@@ -22,7 +22,7 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Custom scrollbar to match minimalist Notion / Obsidian aesthetic */
+/* Custom scrollbar to match minimalist aesthetic */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;

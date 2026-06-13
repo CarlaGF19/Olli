@@ -481,7 +481,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
         if (isBypassed) {
           throw new Error(`El audio grabado superó incluso el límite máximo de 100 MB para entornos locales/VPS (${(payloadSizeBytes / (1024 * 1024)).toFixed(2)} MB). Intenta dividir tu grabación o sesión.`);
         } else {
-          throw new Error(`El audio grabado es demasiado pesado (${(payloadSizeBytes / (1024 * 1024)).toFixed(2)} MB). Las funciones Serverless de Vercel limitan las transferencias de subida a un máximo de 4.5 MB. Te sugerimos realizar grabaciones más cortas o activar 'Desactivar límites de tamaño de audio' en Settings si corres localmente, en VPS o en Cloud Run.`);
+          throw new Error(`El audio grabado es demasiado pesado (${(payloadSizeBytes / (1024 * 1024)).toFixed(2)} MB). Las funciones Serverless de Vercel limitan las transferencias de subida a un máximo de 4.5 MB. Te sugerimos realizar grabaciones más cortas o activar 'Desactivar límites de tamaño de audio' en Settings si corres localmente o en un VPS dedicado.`);
         }
       }
 
@@ -491,13 +491,13 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
 
       if (isCustomKeyValid && settings.aiProvider === "gemini") {
         setProcessingStatus("Transcribiendo directamente en tu navegador con tu API Key (sin límite de servidor)...");
-        const systemPrompt = `You are MeetingBrain, an elite AI tool designed to transcribe recordings and output gorgeous Notion & Obsidian styled meeting summaries.
+        const systemPrompt = `You are MeetingBrain, an elite AI tool designed to transcribe recordings and output gorgeous structured meeting summaries.
 Analyze the audio file provided and generate the response in the language spoken in the audio.
 CRITICAL: If the language of the audio is Spanish, the 'title', 'transcript', and 'summary' MUST be generated entirely in Spanish. Do NOT translate Spanish speech or summaries into English. Default to Spanish when in doubt.
 
 Specifically, generate:
 1. Exact verbatim transcript in the native spoken language. EVERY sentence or speaker change MUST begin with a precise, chronological timestamp indicating exactly when it is spoken in the format '[MM:SS] Speaker: ...' (e.g., "[00:04] Speaker 1: Hola...", "[00:15] Speaker 2: Sí, claro..."). Detail the turns meticulously and timeline everything precisely.
-2. Obsidian-style summary in the native spoken language, featuring chapters with duration timestamps, clean outlines, and bulleted checklist tasks like [ ] or [x] for clear action items.
+2. A structured markdown summary in the native spoken language, featuring chapters with duration timestamps, clean outlines, and bulleted checklist tasks like [ ] or [x] for clear action items.
 3. A short, creative title in the native spoken language summarizing the conversation.`;
 
         let userPrompt = "Realiza una transcripción precisa de este audio y presenta notas estructuradas en el mismo idioma en que se habla (por defecto, español si el audio es en español).";
@@ -615,7 +615,7 @@ Specifically, generate:
             const jsonError = JSON.parse(rawText);
             errorMsg = jsonError.error || errorMsg;
           } catch (e) {
-            // Fallback to analyze raw HTML / text or custom status errors from proxy layers like Vercel/Cloud Run
+            // Fallback to analyze raw HTML / text or custom status errors from proxy layers like Vercel
             if (rawText.includes("Payload Too Large") || response.status === 413) {
               errorMsg = "El audio es demasiado pesado. Las funciones sin servidor de Vercel limitan las subida a 4.5 MB. Por favor realiza grabaciones de menor duración.";
             } else if (response.status === 504 || response.status === 502 || rawText.toLowerCase().includes("timeout")) {
@@ -635,7 +635,7 @@ Specifically, generate:
         }
       }
 
-      setProcessingStatus("Generando resumen ejecutivo y tareas de Obsidian...");
+      setProcessingStatus("Generando resumen ejecutivo y plan de acción...");
       onTranscriptionSuccess({
         ...json,
         id: currentDraftIdRef.current || undefined

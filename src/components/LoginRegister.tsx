@@ -82,7 +82,7 @@ export default function LoginRegister({ onLoginSuccess }: LoginRegisterProps) {
         className="w-full max-w-6xl min-h-[640px] bg-white border border-[#E9E9EB] rounded-3xl shadow-[0_20px_50px_-12px_rgba(0,0,0,0.06)] overflow-hidden grid grid-cols-1 lg:grid-cols-12 relative z-10"
       >
         
-        {/* LEFT COLUMN (7 Cols) - Product value description, Mascot sandbox & Features */}
+        {/* LEFT COLUMN (7 Cols) - Product value description & Features */}
         <div className="lg:col-span-7 bg-[#FAF9F6]/60 border-r border-[#E9E9EB] p-8 sm:p-12 flex flex-col justify-between relative overflow-hidden">
           
           <div>

@@ -204,7 +204,7 @@ export default function MeetingViewer({
     setIsEditingTitle(false);
   };
 
-  // Exporters for Notion/Obsidian integration
+  // Exporters for general structured formats
   const downloadFile = (fileName: string, content: string, mimeType: string) => {
     const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
@@ -612,7 +612,7 @@ ${meeting.transcript}
         <div className="p-4 border-b border-[#E9E9EB] bg-white/40 space-y-3">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-[#111111] tracking-tight uppercase">
-              Obsidian Chest
+              Bóveda Local
             </span>
             <button
               onClick={() => setFilterFavorites(!filterFavorites)}
@@ -775,7 +775,7 @@ ${meeting.transcript}
                   <button
                     onClick={() => handleExportMarkdown(selectedMeeting)}
                     className="p-2 rounded-xl bg-white border border-[#E9E9EB] hover:bg-slate-50 text-slate-500 hover:text-slate-700 transition-colors cursor-pointer"
-                    title="Export Obsidian Markdown"
+                    title="Exportar Markdown"
                   >
                     <Download className="w-3.5 h-3.5" />
                   </button>
@@ -822,7 +822,7 @@ ${meeting.transcript}
                       Borrador Guardado en Tiempo Real (Protección de Sesión)
                     </h3>
                     <p className="text-[11px] text-amber-800 leading-relaxed mt-1">
-                      Esta conversación se guardó automáticamente en vivo para proteger tus apuntes de cortes de internet o límites de servidor. ¿Quieres usar nuestro motor de IA ultrarrápido para redactar un resumen ejecutivo y plan de acción de Obsidian?
+                      Esta conversación se guardó automáticamente en vivo para proteger tus apuntes de cortes de internet o límites de servidor. ¿Quieres usar nuestro motor de IA ultrarrápido para redactar un resumen ejecutivo y plan de acción estructurado?
                     </p>
                     {summarizationError && (
                       <p className="text-[11px] text-rose-600 font-semibold mt-2 bg-rose-50 p-2 rounded-lg border border-rose-100">

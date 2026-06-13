@@ -293,7 +293,7 @@ export default function Dashboard({
             </h3>
             
             <p className="text-xs text-slate-500 leading-relaxed mb-4">
-              Explore your meeting insights effortlessly. Record real-time speech, compile Obsidian-style markdown, and ask Olli any specific question!
+              Explore your meeting insights effortlessly. Record real-time speech, compile structured markdown summaries, and ask Olli any specific question!
             </p>
 
             <div className="space-y-3">
@@ -358,7 +358,7 @@ export default function Dashboard({
                   <p className={`text-[11px] font-semibold leading-none ${meetings.some(m => !m.isDraft) ? "text-slate-400 line-through" : "text-[#1e3a8a]"}`}>
                     Generate AI summary notes
                   </p>
-                  <p className="text-[9px] text-[#2563eb] mt-1">Verify Obsidian & Notion summary formats</p>
+                  <p className="text-[9px] text-[#2563eb] mt-1">Verify structured details and formats</p>
                 </div>
               </div>
 

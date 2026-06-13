@@ -153,10 +153,10 @@ export default function SettingsPanel({
                 <p className="text-[11px] text-slate-400 mt-0.5">Configure la persistencia local de Olli y rutas de guardado.</p>
               </div>
 
-              {/* Obsidian save folder settings */}
+              {/* Save folder settings */}
               <div className="space-y-2">
                 <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                  Ruta del Directorio Obsidian
+                  Ruta del Directorio de Minutas
                 </label>
                 <div className="relative">
                   <span className="absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
@@ -166,7 +166,7 @@ export default function SettingsPanel({
                     type="text"
                     value={audioFolder}
                     onChange={(e) => setAudioFolder(e.target.value)}
-                    placeholder="/MeetingBrain/Vault/"
+                    placeholder="/MeetingBrain/Notes/"
                     className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border border-slate-200 focus:bg-white text-xs rounded-xl outline-none focus:border-[#135bf1] transition-all text-slate-800"
                     required
                   />
@@ -205,7 +205,7 @@ export default function SettingsPanel({
               <div className="p-4 bg-amber-50/20 border border-amber-100 rounded-2xl flex items-center justify-between">
                 <div className="max-w-md pr-4">
                   <span className="text-xs font-bold text-amber-900 block">
-                    Desactivar límites de tamaño ( VPS / Cloud Run / Local )
+                    Desactivar límites de tamaño ( VPS / Local )
                   </span>
                   <span className="text-[10px] text-slate-500 block mt-0.5 leading-relaxed">
                     Si te encuentras libre del entorno Serverless tradicional, activa este bypass para omitir filtros de carga restrictivos y poder transcribir audios de hasta 100 MB de tamaño.
@@ -354,40 +354,20 @@ export default function SettingsPanel({
               </div>
 
               <div className="space-y-3.5">
-                {/* Obsidian card */}
+                {/* General markdown card */}
                 <div className="p-4 bg-white border border-[#E9E9EB] rounded-2xl flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center text-purple-600 shadow-2xs shrink-0">
-                      <Database className="w-5 h-5" />
+                    <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-700 shadow-2xs shrink-0">
+                      <Database className="w-5 h-5 text-[#135bf1]" />
                     </div>
                     <div>
-                      <span className="text-xs font-bold text-slate-755 block">Cofre Local de Obsidian</span>
-                      <p className="text-[10px] text-slate-400 mt-0.5">Se cargará en tus descargas como notas autónomas .MD formateadas</p>
+                      <span className="text-xs font-bold text-slate-800 block">Exportación Autónoma de Notas</span>
+                      <p className="text-[10px] text-slate-400 mt-0.5">Permite descargar actas y transcripciones en archivos Markdown (.md) estándar</p>
                     </div>
                   </div>
                   <span className="px-2.5 py-1 bg-emerald-50 border border-emerald-100 text-emerald-600 text-[10px] font-bold rounded-lg uppercase">
-                    Activo
+                    Disponible
                   </span>
-                </div>
-
-                {/* Notion mock integration */}
-                <div className="p-4 bg-white border border-[#E9E9EB] rounded-2xl flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-slate-50 flex items-center justify-center text-slate-700 shadow-2xs shrink-0 font-bold text-base">
-                      N
-                    </div>
-                    <div>
-                      <span className="text-xs font-bold text-slate-755 block">Sincronización con Notion Workspace</span>
-                      <p className="text-[10px] text-slate-400 mt-0.5">Exporta resúmenes ejecutivos directamente a tu espacio bento</p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => alert("Sincronización con Notion: requiere configurar secretos de integración de Notion en tu servidor.")}
-                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-205 text-[10px] font-bold text-slate-550 rounded-lg cursor-pointer transition-colors"
-                  >
-                    Conectar
-                  </button>
                 </div>
 
                 {/* Email PDFs auto delivery */}
