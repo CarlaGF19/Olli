@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { User } from "../types";
 import { motion, AnimatePresence } from "motion/react";
 import { auth } from "../lib/firebase";
@@ -73,6 +73,13 @@ export default function LoginRegister({ onLoginSuccess }: LoginRegisterProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState("");
   const [infoMessage, setInfoMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, []);
 
   const handleGoogleOAuth = async () => {
     setIsLoading(true);

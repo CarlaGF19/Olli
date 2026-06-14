@@ -399,13 +399,27 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
         try {
           let displayStream: MediaStream;
           try {
+            // Request a 1x1 pixel video track at 1fps to avoid GPU process memory leaks and sandboxing crashes
+            // in PWA window wrappers, while keeping the audio capture fully intact.
             displayStream = await navigator.mediaDevices.getDisplayMedia({
-              video: true,
+              video: {
+                width: { max: 1 },
+                height: { max: 1 },
+                frameRate: { max: 1 }
+              },
               audio: true
-            });
+            } as any);
           } catch (e) {
-            console.error("Stable getDisplayMedia failed:", e);
-            throw e;
+            console.warn("DisplayMedia with low-res video failed, trying simple vanilla fallback...", e);
+            try {
+              displayStream = await navigator.mediaDevices.getDisplayMedia({
+                video: true,
+                audio: true
+              });
+            } catch (err2) {
+              console.error("Stable getDisplayMedia failed:", err2);
+              throw err2;
+            }
           }
           
           const audioTracks = displayStream.getAudioTracks();
