@@ -634,6 +634,7 @@ export default function App() {
                   folders={meetingFolders}
                   selectedMeeting={selectedMeeting}
                   onSelectMeeting={setSelectedMeeting}
+                  onClearSelection={() => setSelectedMeeting(null)}
                   onDeleteMeeting={handleDeleteMeeting}
                   onToggleFavorite={handleToggleFavorite}
                   onUpdateMeetingTitle={handleUpdateMeetingTitle}

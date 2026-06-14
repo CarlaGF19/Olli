@@ -43,6 +43,7 @@ interface MeetingViewerProps {
   folders: MeetingFolder[];
   selectedMeeting: Meeting | null;
   onSelectMeeting: (meeting: Meeting) => void;
+  onClearSelection: () => void;
   onDeleteMeeting: (id: string) => void;
   onToggleFavorite: (id: string) => void;
   onUpdateMeetingTitle: (id: string, newTitle: string) => void;
@@ -62,6 +63,7 @@ export default function MeetingViewer({
   folders,
   selectedMeeting,
   onSelectMeeting,
+  onClearSelection,
   onDeleteMeeting,
   onToggleFavorite,
   onUpdateMeetingTitle,
@@ -216,11 +218,15 @@ Puedes pedirme decisiones, tareas, resumen ejecutivo o preguntas sobre la transc
     : [];
 
   useEffect(() => {
-    if ((!selectedDateFilter && selectedFolderFilter === "all") || filteredMeetings.length === 0) return;
+    if (!selectedDateFilter && selectedFolderFilter === "all") return;
+    if (filteredMeetings.length === 0) {
+      if (selectedMeeting) onClearSelection();
+      return;
+    }
     if (!selectedMeeting || !filteredMeetings.some((meeting) => meeting.id === selectedMeeting.id)) {
       onSelectMeeting(filteredMeetings[0]);
     }
-  }, [selectedDateFilter, selectedFolderFilter, filteredMeetings, selectedMeeting, onSelectMeeting]);
+  }, [selectedDateFilter, selectedFolderFilter, filteredMeetings, selectedMeeting, onSelectMeeting, onClearSelection]);
 
   const handleCreateFolder = async () => {
     const cleanName = newFolderName.trim();
