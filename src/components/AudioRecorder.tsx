@@ -400,22 +400,12 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
           let displayStream: MediaStream;
           try {
             displayStream = await navigator.mediaDevices.getDisplayMedia({
-              video: {
-                displaySurface: "browser"
-              },
-              audio: {
-                echoCancellation: false,
-                noiseSuppression: false,
-                autoGainControl: false
-              } as any,
-              selfBrowserSurface: "exclude",
-              systemAudio: "include"
-            } as any);
-          } catch (e) {
-            displayStream = await navigator.mediaDevices.getDisplayMedia({
               video: true,
               audio: true
             });
+          } catch (e) {
+            console.error("Stable getDisplayMedia failed:", e);
+            throw e;
           }
           
           const audioTracks = displayStream.getAudioTracks();
