@@ -50,8 +50,8 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Enforce Poppins globally to fulfill the absolute font requirement across all widgets */
-*, *::before, *::after {
+/* Enforce Poppins globally to fulfill the absolute font requirement across all widgets, inputs, and form controls */
+*, *::before, *::after, input, select, textarea, button, button *, input::placeholder, textarea::placeholder {
   font-family: "Poppins", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
 }
 
