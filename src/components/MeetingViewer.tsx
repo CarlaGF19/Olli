@@ -66,7 +66,7 @@ export default function MeetingViewer({
 }: MeetingViewerProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [copied, setCopiado] = useState(false);
-  const [filterFavorites, setFilterFavorites] = useState(false);
+  const [selectedDateFilter, setSelectedDateFilter] = useState("all");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState("");
   
@@ -189,15 +189,15 @@ Puedes pedirme decisiones, tareas, resumen ejecutivo o preguntas sobre la transc
   };
 
   // Search and filter meetings
+  const dateFilterOptions = Array.from(new Set(meetings.map((meeting) => formatInUTC5(meeting.date, "shortDate"))));
+
   const filteredMeetings = meetings.filter((meeting) => {
     const matchesSearch =
       meeting.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
       meeting.transcript.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesDate = selectedDateFilter === "all" || formatInUTC5(meeting.date, "shortDate") === selectedDateFilter;
     
-    if (filterFavorites) {
-      return matchesSearch && meeting.isFavorite;
-    }
-    return matchesSearch;
+    return matchesSearch && matchesDate;
   });
 
   const handleCopyClipboard = (text: string) => {
@@ -619,102 +619,6 @@ ${meeting.transcript}
   return (
     <div className="flex h-[calc(100vh-96px)] gap-3 select-none font-sans relative overflow-hidden">
       
-      {/* 1. Left Vault Explorer List */}
-      <div id="vault_explorer" className="w-[260px] bg-white border border-[#E9E9EB] rounded-2xl flex flex-col overflow-hidden shrink-0 max-lg:hidden shadow-sm">
-        
-        {/* Explorer header info */}
-        <div className="p-4 border-b border-[#E9E9EB] bg-white/40 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-[#111111] tracking-tight uppercase">
-              Biblioteca local
-            </span>
-            <button
-              onClick={() => setFilterFavorites(!filterFavorites)}
-              className={`p-1.5 rounded-lg border transition-colors cursor-pointer ${
-                filterFavorites
-                  ? "bg-[#135bf1]/5 border-slate-200 text-[#135bf1]"
-                  : "bg-transparent border-transparent text-slate-400 hover:text-slate-600"
-              }`}
-              title="Filter pinned notes"
-            >
-              <Filter className="w-3.5 h-3.5" />
-            </button>
-          </div>
-          
-          {/* Searching vault */}
-          <div className="relative">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
-            <input
-              type="text"
-              placeholder="Buscar conversaciones..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full bg-[#F4F4F5] pl-9 pr-3 py-1.5 border border-transparent focus:bg-white text-xs rounded-xl outline-none transition-all focus:border-[#EBEBEB]"
-            />
-          </div>
-        </div>
-
-        {/* Saved notes render container */}
-        <div className="flex-grow overflow-y-auto p-2.5 space-y-1.5">
-          {filteredMeetings.length === 0 ? (
-            <div className="text-center py-16 px-4 flex flex-col items-center">
-              <div className="w-12 h-12 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 mb-3 shadow-inner">
-                <FolderOpen className="w-6 h-6 text-slate-400" />
-              </div>
-              <p className="text-[11px] font-bold text-slate-500 uppercase tracking-wide">Biblioteca vacia</p>
-              <p className="text-[10px] text-slate-400 mt-1 leading-normal max-w-[160px] mx-auto text-center">No se encontraron apuntes o actas guardadas</p>
-            </div>
-          ) : (
-            filteredMeetings.map((meeting) => {
-              const representsActive = selectedMeeting?.id === meeting.id;
-              return (
-                <div
-                  key={meeting.id}
-                  onClick={() => onSelectMeeting(meeting)}
-                  className={`p-2.5 rounded-xl cursor-pointer transition-all flex items-start gap-3 group relative border ${
-                    representsActive
-                      ? "bg-[#135bf1]/5 border-[#135bf1]/20 shadow-sm"
-                      : "bg-transparent hover:bg-slate-50/80 border-transparent"
-                  }`}
-                >
-                  {/* Styled Note Indicator Icon */}
-                  <div className={`w-8.5 h-8.5 rounded-lg flex items-center justify-center transition-colors shrink-0 ${
-                    representsActive 
-                      ? "bg-[#135bf1] text-white" 
-                      : "bg-slate-100 text-slate-500 group-hover:bg-[#135bf1]/10 group-hover:text-[#135bf1]"
-                  }`}>
-                    <FileAudio className="w-4.5 h-4.5" />
-                  </div>
-
-                  <div className="min-w-0 flex-grow pr-1">
-                    <span className={`text-[12px] font-bold block truncate transition-colors leading-tight ${
-                      representsActive ? "text-[#135bf1]" : "text-slate-800 group-hover:text-[#135bf1]"
-                    }`}>
-                      {meeting.title}
-                    </span>
-                    <div className="flex items-center space-x-1.5 text-[9.5px] text-slate-400 mt-1 font-semibold">
-                      <span className="flex items-center">
-                        <Calendar className="w-3 h-3 mr-0.5 shrink-0 text-slate-400" />
-                        {formatInUTC5(meeting.date, "shortDate")}
-                      </span>
-                      <span>•</span>
-                      <span className="flex items-center truncate">
-                        <Clock className="w-3 h-3 mr-0.5 shrink-0 text-slate-400" />
-                        {meeting.duration}
-                      </span>
-                    </div>
-                  </div>
-                  
-                  {meeting.isFavorite && (
-                    <Pin className="w-3.5 h-3.5 text-[#135bf1] fill-[#135bf1] shrink-0 mt-1" />
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
-      </div>
-
       {/* 2. Interactive Double Pane (Main Workspace & Ask Olli AI Column) */}
       <div id="notes_workspace" className="flex-grow min-w-0 bg-white border border-[#E9E9EB] rounded-2xl flex flex-row overflow-hidden shadow-sm">
         {selectedMeeting ? (
@@ -722,6 +626,73 @@ ${meeting.transcript}
             
             {/* Left Pane - Document text and media */}
             <div className="flex-grow flex flex-col h-full min-w-0 border-r border-[#E9E9EB] relative">
+              <div className="px-6 py-3 border-b border-[#E9E9EB] bg-white space-y-3">
+                <div className="flex flex-col xl:flex-row xl:items-center gap-3">
+                  <div className="relative w-full xl:max-w-xs">
+                    <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-3" />
+                    <input
+                      type="text"
+                      placeholder="Buscar conversaciones..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full bg-[#F4F4F5] pl-9 pr-3 py-2 border border-transparent focus:bg-white text-xs rounded-xl outline-none transition-all focus:border-[#EBEBEB]"
+                    />
+                  </div>
+
+                  <div className="flex items-center gap-2 overflow-x-auto pb-1 xl:pb-0">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedDateFilter("all")}
+                      className={`px-3 py-1.5 rounded-full border text-[10px] font-bold whitespace-nowrap transition-all ${
+                        selectedDateFilter === "all"
+                          ? "bg-[#135bf1] border-[#135bf1] text-white"
+                          : "bg-white border-[#E9E9EB] text-slate-500 hover:text-[#135bf1]"
+                      }`}
+                    >
+                      Todas
+                    </button>
+                    {dateFilterOptions.map((date) => (
+                      <button
+                        key={date}
+                        type="button"
+                        onClick={() => setSelectedDateFilter(date)}
+                        className={`px-3 py-1.5 rounded-full border text-[10px] font-bold whitespace-nowrap transition-all ${
+                          selectedDateFilter === date
+                            ? "bg-[#135bf1] border-[#135bf1] text-white"
+                            : "bg-white border-[#E9E9EB] text-slate-500 hover:text-[#135bf1]"
+                        }`}
+                      >
+                        {date}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 overflow-x-auto pb-1">
+                  {filteredMeetings.length === 0 ? (
+                    <span className="text-[11px] text-slate-400">No hay reuniones para este filtro.</span>
+                  ) : (
+                    filteredMeetings.map((meeting) => (
+                      <button
+                        key={meeting.id}
+                        type="button"
+                        onClick={() => onSelectMeeting(meeting)}
+                        className={`px-3 py-2 rounded-xl border text-left min-w-[210px] max-w-[260px] transition-all ${
+                          selectedMeeting?.id === meeting.id
+                            ? "bg-[#135bf1]/5 border-[#135bf1]/30 text-[#135bf1]"
+                            : "bg-white border-[#E9E9EB] text-slate-600 hover:border-[#135bf1]/30"
+                        }`}
+                      >
+                        <span className="block text-[11px] font-black truncate">{meeting.title}</span>
+                        <span className="mt-1 flex items-center gap-2 text-[9.5px] text-slate-400 font-semibold">
+                          <span>{formatInUTC5(meeting.date, "shortDate")}</span>
+                          <span>{meeting.duration}</span>
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
               
               {/* Doc Workspace header controls */}
               <div className="p-6 border-b border-[#E9E9EB] bg-white flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
