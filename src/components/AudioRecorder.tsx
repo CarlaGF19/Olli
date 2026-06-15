@@ -7,7 +7,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { Mic, Square, Play, Pause, UploadCloud, FileAudio, AlertCircle, Sparkles, Brain, Tv, Volume2, FileDown, Check, Send, HelpCircle, GraduationCap, Search, ArrowRight, Loader2, Cpu } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { jsPDF } from "jspdf";
-import { isBrowserWhisperSupported, transcribeAudioInBrowser, warmupBrowserWhisper } from "../lib/browserWhisper";
+import { isBrowserWhisperSupported, transcribePcmInBrowser, warmupBrowserWhisper } from "../lib/browserWhisper";
 
 interface AudioRecorderProps {
   onTranscriptionSuccess: (transcription: { id?: string; title: string; transcript: string; summary: string }, durationSec: number) => void;
@@ -250,7 +250,10 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const recognitionRef = useRef<any>(null);
   const stopRecordingRef = useRef<() => void>();
-  const digitalLiveChunksRef = useRef<Blob[]>([]);
+  const digitalLivePcmChunksRef = useRef<Float32Array[]>([]);
+  const digitalLivePcmSampleCountRef = useRef(0);
+  const digitalLiveSampleRateRef = useRef(48000);
+  const digitalLiveProcessorRef = useRef<ScriptProcessorNode | null>(null);
   const digitalLiveLastFlushRef = useRef(0);
   const digitalLiveBusyRef = useRef(false);
   const digitalLiveEnabledRef = useRef(false);
@@ -304,9 +307,15 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
       timerIntervalRef.current = null;
     }
     setIsDigitalLiveTranscribing(false);
-    digitalLiveChunksRef.current = [];
+    digitalLivePcmChunksRef.current = [];
+    digitalLivePcmSampleCountRef.current = 0;
     digitalLiveBusyRef.current = false;
     digitalLiveLastFlushRef.current = 0;
+    if (digitalLiveProcessorRef.current) {
+      digitalLiveProcessorRef.current.disconnect();
+      digitalLiveProcessorRef.current.onaudioprocess = null;
+      digitalLiveProcessorRef.current = null;
+    }
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
@@ -339,27 +348,42 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
     });
   };
 
+  const consumeDigitalPcmBuffer = () => {
+    const chunks = digitalLivePcmChunksRef.current.splice(0);
+    const totalSamples = digitalLivePcmSampleCountRef.current;
+    digitalLivePcmSampleCountRef.current = 0;
+
+    const merged = new Float32Array(totalSamples);
+    let offset = 0;
+    chunks.forEach((chunk) => {
+      merged.set(chunk, offset);
+      offset += chunk.length;
+    });
+
+    return merged;
+  };
+
   const flushDigitalLiveTranscript = async (force = false) => {
     if (!digitalLiveEnabledRef.current || captureSourceRef.current !== "screen") return;
     if (digitalLiveBusyRef.current) return;
-    if (digitalLiveChunksRef.current.length === 0) return;
+    if (digitalLivePcmSampleCountRef.current === 0) return;
 
     const now = Date.now();
     if (!force && now - digitalLiveLastFlushRef.current < 8000) return;
 
-    const chunks = digitalLiveChunksRef.current.splice(0);
+    const audio = consumeDigitalPcmBuffer();
     digitalLiveLastFlushRef.current = now;
     digitalLiveBusyRef.current = true;
     setIsDigitalLiveTranscribing(true);
 
     try {
-      const audioBlob = new Blob(chunks, { type: "audio/webm" });
-      if (audioBlob.size < 5000) {
+      const minSamples = Math.round(digitalLiveSampleRateRef.current * 1.5);
+      if (audio.length < minSamples) {
         digitalLiveBusyRef.current = false;
         setIsDigitalLiveTranscribing(false);
         return;
       }
-      const transcript = (await transcribeAudioInBrowser(audioBlob)).trim();
+      const transcript = (await transcribePcmInBrowser(audio, digitalLiveSampleRateRef.current)).trim();
       if (transcript) {
         const nextText = `${liveTranscriptRef.current ? `${liveTranscriptRef.current.trim()} ` : ""}${transcript}`.trim();
         liveTranscriptRef.current = `${nextText} `;
@@ -385,7 +409,8 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
 
       setSpeechErrorNotice("Cargando Whisper local dentro de la web. La primera vez puede tardar mientras se descarga el modelo.");
       await warmupBrowserWhisper();
-      digitalLiveChunksRef.current = [];
+      digitalLivePcmChunksRef.current = [];
+      digitalLivePcmSampleCountRef.current = 0;
       digitalLiveLastFlushRef.current = 0;
     } else {
       await flushDigitalLiveTranscript(true);
@@ -406,6 +431,28 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
 
       analyser.fftSize = 256;
       source.connect(analyser);
+
+      if (captureSourceRef.current === "screen") {
+        digitalLiveSampleRateRef.current = audioContext.sampleRate;
+        const processor = audioContext.createScriptProcessor(4096, 1, 1);
+        processor.onaudioprocess = (event) => {
+          const output = event.outputBuffer.getChannelData(0);
+          output.fill(0);
+
+          if (!digitalLiveEnabledRef.current || captureSourceRef.current !== "screen") return;
+
+          const input = event.inputBuffer.getChannelData(0);
+          const copy = new Float32Array(input.length);
+          copy.set(input);
+          digitalLivePcmChunksRef.current.push(copy);
+          digitalLivePcmSampleCountRef.current += copy.length;
+
+          flushDigitalLiveTranscript(false);
+        };
+        source.connect(processor);
+        processor.connect(audioContext.destination);
+        digitalLiveProcessorRef.current = processor;
+      }
 
       audioContextRef.current = audioContext;
       analyserRef.current = analyser;
@@ -566,10 +613,6 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data);
-          if (captureSourceRef.current === "screen" && digitalLiveEnabledRef.current) {
-            digitalLiveChunksRef.current.push(event.data);
-            flushDigitalLiveTranscript(false);
-          }
         }
       };
 

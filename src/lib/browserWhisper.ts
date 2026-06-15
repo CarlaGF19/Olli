@@ -66,28 +66,25 @@ function requestWorker(type: "warmup" | "transcribe", audio?: Float32Array) {
   });
 }
 
-async function decodeToMono16k(blob: Blob) {
-  const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-  const audioContext = new AudioCtx();
-  const arrayBuffer = await blob.arrayBuffer();
-  const decoded = await audioContext.decodeAudioData(arrayBuffer.slice(0));
-
+function resampleTo16k(input: Float32Array, sourceSampleRate: number) {
   const targetSampleRate = 16000;
-  const offlineContext = new OfflineAudioContext(
-    1,
-    Math.ceil(decoded.duration * targetSampleRate),
-    targetSampleRate
-  );
+  if (sourceSampleRate === targetSampleRate) {
+    return new Float32Array(input);
+  }
 
-  const source = offlineContext.createBufferSource();
-  source.buffer = decoded;
-  source.connect(offlineContext.destination);
-  source.start(0);
+  const ratio = sourceSampleRate / targetSampleRate;
+  const outputLength = Math.max(1, Math.round(input.length / ratio));
+  const output = new Float32Array(outputLength);
 
-  const rendered = await offlineContext.startRendering();
-  await audioContext.close().catch(() => {});
+  for (let i = 0; i < outputLength; i += 1) {
+    const sourceIndex = i * ratio;
+    const index = Math.floor(sourceIndex);
+    const nextIndex = Math.min(index + 1, input.length - 1);
+    const weight = sourceIndex - index;
+    output[i] = input[index] * (1 - weight) + input[nextIndex] * weight;
+  }
 
-  return new Float32Array(rendered.getChannelData(0));
+  return output;
 }
 
 export async function warmupBrowserWhisper() {
@@ -98,11 +95,10 @@ export async function warmupBrowserWhisper() {
   await requestWorker("warmup");
 }
 
-export async function transcribeAudioInBrowser(blob: Blob) {
+export async function transcribePcmInBrowser(audio: Float32Array, sampleRate: number) {
   if (!isBrowserWhisperSupported()) {
     throw new Error("Este navegador no soporta transcripcion local dentro de la web.");
   }
 
-  const audio = await decodeToMono16k(blob);
-  return requestWorker("transcribe", audio);
+  return requestWorker("transcribe", resampleTo16k(audio, sampleRate));
 }
