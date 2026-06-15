@@ -76,6 +76,7 @@ export default function MeetingViewer({
   const [folderError, setFolderError] = useState("");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState("");
+  const [activeDocTab, setActiveDocTab] = useState<"transcript" | "summary">("transcript");
   
   // Custom states for draft summarization
   const [isSummarizing, setIsSummarizing] = useState(false);
@@ -96,9 +97,8 @@ export default function MeetingViewer({
   // Otter.ai Double-Pane AI Chat assistant state
   const [isChatPanelOpen, setIsChatPanelOpen] = useState(() => {
     if (typeof window === "undefined") return false;
-    return window.innerWidth >= 1600;
+    return window.innerWidth >= 1180;
   });
-  const [chatTab, setChatTab] = useState<"chat" | "outline" | "comments">("chat");
   const [userChatMessage, setUserChatMessage] = useState("");
   const [isGeneratingChat, setIsGeneratingChat] = useState(false);
   const [chatError, setChatError] = useState("");
@@ -146,6 +146,10 @@ Puedes pedirme decisiones, tareas, resumen ejecutivo o preguntas sobre la transc
       chatEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
   }, [conversations, selectedMeeting, isGeneratingChat]);
+
+  useEffect(() => {
+    setActiveDocTab("transcript");
+  }, [selectedMeeting?.id]);
 
   const handleSummarizeDraftText = async (meeting: Meeting) => {
     if (!meeting.transcript || meeting.transcript.trim().length === 0) {
@@ -226,6 +230,31 @@ Puedes pedirme decisiones, tareas, resumen ejecutivo o preguntas sobre la transc
   const activeMeeting = selectedMeeting && filteredMeetings.some((meeting) => meeting.id === selectedMeeting.id)
     ? selectedMeeting
     : null;
+
+  const getSummarySections = (meeting: Meeting) => {
+    const cleanSummary = cleanTextForExport(meeting.summary, {
+      fallback: "",
+      maxWords: 1200,
+    });
+    const lines = cleanSummary.split("\n").map((line) => line.trim()).filter(Boolean);
+    const rawLines = (meeting.summary || "").split("\n").map((line) => line.trim()).filter(Boolean);
+    const actionLines = lines.filter((line) => /^\s*[-*]?\s*(\[[ xX]\])?\s*(tarea|accion|acción|pendiente|responsable|hacer|actualizar|revisar|definir)/i.test(line));
+    const outlineLines = rawLines
+      .filter((line) => /^#{1,4}\s+/.test(line) || /^\d+[\).]\s+/.test(line))
+      .map((line) => line.replace(/^#{1,4}\s+/, ""));
+
+    return {
+      overview: cleanSummary || "Aun no hay resumen generado. Activa el analisis con IA cuando quieras convertir la transcripcion en puntos clave.",
+      actions: actionLines.length > 0 ? actionLines.join("\n") : "No se detectaron acciones estructuradas todavia.",
+      outline: outlineLines.length > 0 ? outlineLines.join("\n") : "No hay esquema generado todavia.",
+    };
+  };
+
+  const assistantPrompts = [
+    "¿Es correcto lo que explicó el profesor?",
+    "¿Cuáles son las tareas o pendientes?",
+    "¿Qué decisiones se tomaron?",
+  ];
 
   const handleDeleteSelectedFolder = async () => {
     if (selectedFolderFilter === "all" || selectedFolderFilter === "none") return;
@@ -463,6 +492,16 @@ ${meeting.transcript}
   // Otter.ai Interactive Ask Q&A handler
   const handleQueryOlliChat = async (questionText: string) => {
     if (!selectedMeeting || !questionText || !questionText.trim()) return;
+
+    const cleanTranscript = cleanTextForExport(selectedMeeting.transcript, {
+      fallback: "",
+      maxWords: 1200,
+    });
+
+    if (cleanTranscript.split(/\s+/).filter(Boolean).length < 20) {
+      setChatError("Aun no hay texto suficiente para consultar.");
+      return;
+    }
 
     setUserChatMessage("");
     setChatError("");
@@ -828,7 +867,7 @@ ${meeting.transcript}
               </div>
 
               {/* 💡 DRAFT AI SUMMARY TRIGGER BANNER */}
-              {selectedMeeting.isDraft && (
+              {false && selectedMeeting.isDraft && (
                 <div className="mx-6 mt-5 p-6 bg-gradient-to-br from-blue-50 to-white border border-blue-100 rounded-2xl text-left flex flex-col md:flex-row items-start md:items-center justify-between gap-5">
                   <div className="flex-1">
                     <h3 className="text-lg font-black text-slate-900 flex items-center gap-2 tracking-tight">
@@ -862,282 +901,288 @@ ${meeting.transcript}
                 </div>
               )}
 
-              {/* Display notes area */}
-              <div className="flex-grow overflow-y-auto p-6 bg-slate-50/40 relative">
-                <div className="space-y-5">
-                  <section className="bg-white border border-[#E9E9EB]/80 rounded-2xl p-6 shadow-2xs text-left">
-                    <div className="flex items-center gap-2 mb-4">
-                      <BookOpen className="w-4 h-4 text-[#135bf1]" />
-                      <h2 className="text-lg font-black text-slate-900">Resumen ejecutivo</h2>
+              {/* Display document area */}
+              <div className="flex-grow overflow-y-auto bg-white relative">
+                <div className="sticky top-0 z-10 bg-white border-b border-[#E9E9EB] px-6 pt-2">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-6">
+                      <button
+                        type="button"
+                        onClick={() => setActiveDocTab("transcript")}
+                        className={`py-4 text-sm font-bold border-b-2 transition-colors ${
+                          activeDocTab === "transcript"
+                            ? "border-[#135bf1] text-[#111111]"
+                            : "border-transparent text-slate-500 hover:text-[#111111]"
+                        }`}
+                      >
+                        Transcription
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setActiveDocTab("summary")}
+                        className={`py-4 text-sm font-bold border-b-2 transition-colors ${
+                          activeDocTab === "summary"
+                            ? "border-[#135bf1] text-[#111111]"
+                            : "border-transparent text-slate-500 hover:text-[#111111]"
+                        }`}
+                      >
+                        Summary
+                      </button>
                     </div>
-                    <div id="markdown_body" className="space-y-2 leading-relaxed font-sans">
-                      {renderMarkdown(selectedMeeting.summary)}
-                    </div>
-                  </section>
+                    {activeDocTab === "summary" && (
+                      <span className="text-xs font-bold text-slate-700">Template: General</span>
+                    )}
+                  </div>
+                </div>
 
-                  <section className="bg-white border border-[#E9E9EB]/80 rounded-2xl p-6 shadow-2xs text-left">
-                    <div className="flex items-center gap-2 mb-4">
-                      <FileText className="w-4 h-4 text-[#135bf1]" />
-                      <h2 className="text-lg font-black text-slate-900">Transcripcion</h2>
-                    </div>
-                    <div className="font-sans text-slate-700 leading-7 text-[14px] whitespace-pre-wrap font-medium space-y-3 text-justify [text-wrap:pretty]">
-                      {selectedMeeting.transcript ? (
-                        selectedMeeting.transcript.split("\n").map((line, idx) => {
-                          const match = line.match(/^\[(\d{2}:\d{2})\]\s*(.*?):\s*(.*)/);
-                          if (match) {
-                            const timestamp = match[1];
-                            const speaker = match[2];
-                            const utterance = match[3];
-                            return (
-                              <div key={idx} className="flex flex-col md:flex-row md:items-start gap-2.5 pb-2 border-b border-[#F4F4F5] last:border-b-0">
-                                <div className="flex items-center gap-2 shrink-0 md:w-32">
-                                  <span className="text-[10px] bg-[#EBEBEB] text-[#111111] px-1.5 py-0.5 rounded-sm font-semibold font-mono">
-                                    {timestamp}
-                                  </span>
-                                  <span className="text-xs font-bold text-[#111111] truncate max-w-[80px]" title={speaker}>
-                                    {speaker}
-                                  </span>
-                                </div>
-                                <p className="text-xs text-slate-655 text-left flex-grow">
-                                  {utterance}
+                <div className="px-6 py-8 max-w-4xl">
+                  {activeDocTab === "transcript" ? (
+                    <section className="text-left">
+                      <div className="flex items-center gap-3 mb-6">
+                        <FileText className="w-4 h-4 text-[#135bf1]" />
+                        <h2 className="text-xl font-black text-slate-900">Transcription</h2>
+                      </div>
+                      <div className="font-sans text-slate-800 leading-8 text-[15px] whitespace-pre-wrap font-medium space-y-3 text-left [text-wrap:pretty]">
+                        {selectedMeeting.transcript ? (
+                          cleanTextForExport(selectedMeeting.transcript, { fallback: "", maxWords: 8000 })
+                            .split("\n")
+                            .map((line, idx) => {
+                              const match = line.match(/^\[(\d{2}:\d{2})\]\s*(.*?):\s*(.*)/);
+                              if (match) {
+                                const timestamp = match[1];
+                                const speaker = match[2];
+                                const utterance = match[3];
+                                return (
+                                  <div key={idx} className="flex flex-col md:flex-row md:items-start gap-3 pb-3 border-b border-[#F4F4F5] last:border-b-0">
+                                    <div className="flex items-center gap-2 shrink-0 md:w-36">
+                                      <span className="text-[11px] bg-[#F4F4F5] text-[#111111] px-2 py-1 rounded-md font-semibold font-mono">
+                                        {timestamp}
+                                      </span>
+                                      <span className="text-xs font-bold text-[#111111] truncate max-w-[90px]" title={speaker}>
+                                        {speaker}
+                                      </span>
+                                    </div>
+                                    <p className="text-sm text-slate-700 text-left flex-grow leading-7">{utterance}</p>
+                                  </div>
+                                );
+                              }
+                              return (
+                                <p key={idx} className="text-sm text-slate-700 text-left leading-8">
+                                  {line}
                                 </p>
-                              </div>
-                            );
-                          }
-                          return (
-                            <p key={idx} className="text-xs text-slate-655 text-left leading-6">
-                              {line}
+                              );
+                            })
+                        ) : (
+                          <p className="font-sans italic text-slate-400 text-sm py-8">
+                            No hay transcripcion disponible.
+                          </p>
+                        )}
+                      </div>
+                    </section>
+                  ) : (
+                    <section className="text-left space-y-8">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-2xl border border-blue-100 bg-blue-50/60 p-5">
+                        <div>
+                          <h2 className="text-xl font-black text-slate-900 flex items-center gap-2">
+                            <Sparkles className="w-5 h-5 text-[#135bf1]" />
+                            Summary
+                          </h2>
+                          <p className="text-sm text-slate-600 leading-6 mt-2 max-w-2xl">
+                            Activa el analisis para generar Overview, Action Items y Outlines desde la transcripcion. Esta accion usa Gemini y consume cuota/API.
+                          </p>
+                          {summarizationError && (
+                            <p className="text-[11px] text-rose-600 font-semibold mt-2 bg-white p-2 rounded-lg border border-rose-100">
+                              Error: {summarizationError}
                             </p>
-                          );
-                        })
-                      ) : (
-                        <p className="font-sans italic text-slate-400 text-xs text-center py-8">
-                          No hay transcripcion disponible.
-                        </p>
-                      )}
-                    </div>
-                  </section>
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleSummarizeDraftText(selectedMeeting)}
+                          disabled={isSummarizing || !selectedMeeting.transcript}
+                          className="inline-flex items-center justify-center gap-2 px-4 py-2.5 bg-[#135bf1] hover:bg-[#0746cc] text-white rounded-xl text-xs font-bold transition-all shadow-sm cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isSummarizing ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}
+                          <span>{isSummarizing ? "Analizando..." : "Analizar con IA"}</span>
+                        </button>
+                      </div>
+
+                      {(["overview", "actions", "outline"] as const).map((sectionKey) => {
+                        const labels = {
+                          overview: "Overview",
+                          actions: "Action Items",
+                          outline: "Outlines",
+                        };
+                        const content = getSummarySections(selectedMeeting)[sectionKey];
+                        return (
+                          <div key={sectionKey} className="space-y-3">
+                            <div className="flex items-center gap-3">
+                              {sectionKey === "overview" ? <BookOpen className="w-4 h-4 text-[#135bf1]" /> : sectionKey === "actions" ? <UserCheck className="w-4 h-4 text-emerald-600" /> : <Filter className="w-4 h-4 text-slate-600" />}
+                              <h3 className="text-lg font-black text-slate-900">{labels[sectionKey]}</h3>
+                            </div>
+                            <div className="pl-7 text-[15px] leading-8 text-slate-700">
+                              {renderMarkdown(content)}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </section>
+                  )}
                 </div>
               </div>
 
             </div>
 
-            {/* Right Pane - Otter Olli AI Interactive Chat column */}
+            {/* Right Pane - Olli contextual assistant */}
             <AnimatePresence>
               {isChatPanelOpen && (
-                <motion.div
+                <motion.aside
                   id="olli_assistant_column"
                   initial={{ width: 0, opacity: 0 }}
-                  animate={{ width: 320, opacity: 1 }}
+                  animate={{ width: 440, opacity: 1 }}
                   exit={{ width: 0, opacity: 0 }}
                   transition={{ type: "tween", duration: 0.2 }}
-                  className="bg-white flex flex-col h-full shrink-0 border-l border-[#EBEBEB] overflow-hidden"
+                  className="bg-white flex flex-col h-full shrink-0 border-l border-[#E5E7EB] overflow-hidden"
                 >
-                  {/* Olli Header */}
-                  <div className="p-4 border-b border-[#E9E9EB] flex items-center justify-between bg-white">
-                    <div className="flex items-center gap-2">
-                      <div className="w-6.5 h-6.5 rounded-full bg-[#135bf1]/10 flex items-center justify-center">
-                        <Sparkles className="w-3.5 h-3.5 text-[#135bf1]" />
+                  <div className="h-16 px-5 border-b border-[#E5E7EB] flex items-center justify-between bg-white">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-8 h-8 rounded-full bg-[#135bf1]/10 flex items-center justify-center shrink-0">
+                        <Sparkles className="w-4 h-4 text-[#135bf1]" />
                       </div>
-                      <span className="text-sm font-bold text-[#111111] tracking-tight">Olli AI</span>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-sm font-black text-[#111111] tracking-tight">New chat</span>
+                          <ChevronRight className="w-3.5 h-3.5 text-slate-400 rotate-90" />
+                        </div>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          Consulta esta conversacion
+                        </p>
+                      </div>
                     </div>
-
-                    <button 
+                    <button
                       onClick={() => setIsChatPanelOpen(false)}
-                      className="p-1 hover:bg-[#F4F4F5] rounded-full text-slate-400 hover:text-slate-700 transition"
-                      title="Hide chatbot"
+                      className="p-2 hover:bg-[#F4F4F5] rounded-full text-slate-400 hover:text-slate-700 transition"
+                      title="Cerrar asistente"
                     >
                       <X className="w-4 h-4" />
                     </button>
                   </div>
 
-                  {/* AI Column tab switchers */}
-                  <div className="px-4 py-2 bg-white border-b border-[#E9E9EB] flex gap-1">
-                    <button 
-                      onClick={() => setChatTab("chat")}
-                      className={`text-[11px] font-bold py-2 px-3 rounded-lg transition-all ${
-                        chatTab === "chat" ? "bg-[#135bf1] text-white" : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
-                      }`}
-                    >
-                      Chat
-                    </button>
-                    <button 
-                      onClick={() => setChatTab("outline")}
-                      className={`text-[11px] font-bold py-2 px-3 rounded-lg transition-all ${
-                        chatTab === "outline" ? "bg-[#135bf1] text-white" : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
-                      }`}
-                    >
-                      Guia
-                    </button>
-                    <button 
-                      onClick={() => setChatTab("comments")}
-                      className={`text-[11px] font-bold py-2 px-3 rounded-lg transition-all ${
-                        chatTab === "comments" ? "bg-[#135bf1] text-white" : "text-slate-500 hover:text-slate-800 hover:bg-slate-50"
-                      }`}
-                    >
-                      Notas
-                    </button>
+                  <div className="flex-1 overflow-y-auto p-5 space-y-5 bg-white">
+                    <div className="space-y-3">
+                      {assistantPrompts.map((prompt) => (
+                        <button
+                          key={prompt}
+                          type="button"
+                          onClick={() => handleQueryOlliChat(prompt)}
+                          disabled={isGeneratingChat}
+                          className="w-full rounded-3xl bg-[#F4F4F5] hover:bg-[#ECEEF2] px-5 py-4 text-left text-[13px] leading-5 font-black text-[#111111] transition-colors disabled:opacity-50"
+                        >
+                          {prompt}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="space-y-4 pt-1">
+                      {conversations[selectedMeeting.id]?.map((msg, idx) => {
+                        const isAI = msg.role === "model";
+                        return (
+                          <div key={idx} className={`flex items-start gap-3 ${isAI ? "" : "flex-row-reverse"}`}>
+                            <div className={`w-8 h-8 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0 border select-none ${
+                              isAI
+                                ? "bg-[#135bf1]/8 border-[#135bf1]/15 text-[#135bf1]"
+                                : "bg-[#F5F2EB] border-[#E2E0D8] text-slate-700"
+                            }`}>
+                              {isAI ? "AI" : "Tu"}
+                            </div>
+                            <div className={`max-w-[82%] ${isAI ? "text-left" : "text-right"}`}>
+                              <div className={`px-4 py-3 rounded-2xl text-[13px] leading-6 ${
+                                isAI
+                                  ? "bg-white border border-[#E5E7EB] text-slate-800"
+                                  : "bg-[#135bf1] text-white"
+                              }`}>
+                                <div className="whitespace-pre-wrap font-sans">
+                                  {isAI ? renderMarkdown(msg.content) : msg.content}
+                                </div>
+                              </div>
+                              <span className="text-[10px] text-slate-400 mt-1 block">{msg.timestamp}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {isGeneratingChat && (
+                        <div className="flex items-start gap-3">
+                          <div className="w-8 h-8 rounded-full bg-[#135bf1]/8 border border-[#135bf1]/15 flex items-center justify-center text-[10px] text-[#135bf1] shrink-0">
+                            AI
+                          </div>
+                          <div className="bg-white border border-[#E5E7EB] px-4 py-3 rounded-2xl flex items-center gap-2">
+                            <span className="w-1.5 h-1.5 bg-[#135bf1] rounded-full animate-bounce" />
+                            <span className="w-1.5 h-1.5 bg-[#135bf1] rounded-full animate-bounce [animation-delay:0.2s]" />
+                            <span className="w-1.5 h-1.5 bg-[#135bf1] rounded-full animate-bounce [animation-delay:0.4s]" />
+                          </div>
+                        </div>
+                      )}
+
+                      {chatError && (
+                        <div className="p-3 bg-rose-50 border border-rose-100 rounded-2xl text-[12px] text-rose-700 text-left leading-relaxed">
+                          {getFriendlyAIError(chatError)}
+                        </div>
+                      )}
+
+                      <div ref={chatEndRef} />
+                    </div>
                   </div>
 
-                  {/* Olli Tab Screen Viewport */}
-                  {chatTab === "chat" ? (
-                    <div className="flex-grow flex flex-col overflow-hidden min-h-0">
-                      
-                      {/* Active messages scroll panel */}
-                      <div className="flex-grow overflow-y-auto p-4 space-y-4">
-                        {conversations[selectedMeeting.id]?.map((msg, idx) => {
-                          const isAI = msg.role === "model";
-                          return (
-                            <div key={idx} className={`flex items-start gap-2.5 pt-2 first:pt-0 ${isAI ? "" : "flex-row-reverse"}`}>
-                              {/* Avatar symbol */}
-                              <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-[9px] shrink-0 border select-none ${
-                                isAI 
-                                  ? "bg-[#135bf1]/8 border-[#135bf1]/15 text-[#135bf1]" 
-                                  : "bg-[#F5F2EB] border-[#E2E0D8] text-slate-700"
-                              }`}>
-                                {isAI ? "AI" : "Tu"}
-                              </div>
-                              
-                              <div className="text-left w-full max-w-[86%]">
-                                <div className={`px-3 py-2.5 rounded-2xl text-[11px] leading-relaxed shadow-3xs ${
-                                  isAI 
-                                    ? "bg-white border border-[#E9E9EB] text-slate-750" 
-                                    : "bg-[#135bf1] text-white"
-                                }`}>
-                                  <div className="whitespace-pre-wrap select-none font-sans">
-                                    {isAI ? renderMarkdown(msg.content) : msg.content}
-                                  </div>
-                                </div>
-                                <span className={`text-[8px] text-slate-400 mt-0.5 block ${isAI ? "text-left pl-1" : "text-right pr-1"}`}>
-                                  {msg.timestamp}
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })}
-
-                        {/* Spinner loading */}
-                        {isGeneratingChat && (
-                          <div className="flex items-start gap-2.5 pt-2">
-                            <div className="w-7 h-7 rounded-full bg-[#135bf1]/8 border border-[#135bf1]/15 flex items-center justify-center text-[9px] shrink-0">
-                            AI
-                            </div>
-                            <div className="bg-white border border-[#E9E9EB] px-4 py-3 rounded-2xl flex items-center gap-2">
-                              <span className="w-1.5 h-1.5 bg-[#135bf1] rounded-full animate-bounce" />
-                              <span className="w-1.5 h-1.5 bg-[#135bf1] rounded-full animate-bounce [animation-delay:0.2s]" />
-                              <span className="w-1.5 h-1.5 bg-[#135bf1] rounded-full animate-bounce [animation-delay:0.4s]" />
-                              <span className="text-[10px] text-slate-455 ml-1">Olli esta analizando...</span>
-                            </div>
-                          </div>
-                        )}
-
-                        {chatError && (
-                          <div className="p-3 bg-rose-50 border border-rose-100 rounded-xl text-[11px] text-rose-700 text-left leading-relaxed">
-                            {getFriendlyAIError(chatError)}
-                          </div>
-                        )}
-
-                        <div ref={chatEndRef} />
+                  <div className="border-t border-[#E5E7EB] bg-white p-4">
+                    <div className="mb-3 flex items-center justify-between gap-3 rounded-t-2xl bg-blue-50 px-4 py-2 text-[11px] text-slate-600">
+                      <span className="font-semibold">Tu chat es privado. Las respuestas usan Gemini y consumen API.</span>
+                      <span className="font-bold text-[#135bf1] shrink-0">Entendido.</span>
+                    </div>
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        if (userChatMessage.trim()) {
+                          handleQueryOlliChat(userChatMessage.trim());
+                        }
+                      }}
+                      className="rounded-2xl border border-[#CBD5E1] bg-white p-4 shadow-sm"
+                    >
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="inline-flex w-8 h-8 items-center justify-center rounded-full border border-[#E5E7EB] text-slate-500">@</span>
+                        <span className="max-w-[260px] truncate rounded-full border border-[#E5E7EB] px-3 py-1.5 text-[11px] font-bold text-slate-700">
+                          {selectedMeeting.title}
+                        </span>
                       </div>
-
-                      {/* Prompt suggestion quick pills as shown in Otter screenshot */}
-                      <div className="px-4 py-3 border-t border-[#E9E9EB]/60 bg-slate-50 space-y-2 text-left">
-                        <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest leading-none mb-1">Acciones rapidas</p>
-                        
-                        <div className="grid grid-cols-1 gap-2 select-none">
-                          <button
-                            onClick={() => handleQueryOlliChat("Cuales son las decisiones tomadas en esta reunion?")}
-                            disabled={isGeneratingChat}
-                            className="text-[11px] font-semibold bg-white hover:bg-slate-50 border border-[#E9E9EB] text-[#135bf1] px-3 py-2 rounded-xl transition-colors cursor-pointer text-left"
-                          >
-                        Decisiones tomadas
-                          </button>
-                          <button
-                            onClick={() => handleQueryOlliChat("Escribe un plan de accion con tareas y responsables.")}
-                            disabled={isGeneratingChat}
-                            className="text-[11px] font-semibold bg-white hover:bg-slate-50 border border-[#E9E9EB] text-[#135bf1] px-3 py-2 rounded-xl transition-colors cursor-pointer text-left"
-                          >
-                            Crear plan de accion
-                          </button>
-                          <button
-                            onClick={() => handleQueryOlliChat("Hazme un resumen ejecutivo de 3 vinetas breves.")}
-                            disabled={isGeneratingChat}
-                            className="text-[11px] font-semibold bg-white hover:bg-slate-50 border border-[#E9E9EB] text-[#135bf1] px-3 py-2 rounded-xl transition-colors cursor-pointer text-left"
-                          >
-                            Resumen de 3 vinetas
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Footer text prompt ask area */}
-                      <div className="p-3 bg-white border-t border-[#E9E9EB]">
-                        <form
-                          onSubmit={(e) => {
-                            e.preventDefault();
-                            if (userChatMessage.trim()) {
-                              handleQueryOlliChat(userChatMessage.trim());
-                            }
-                          }}
-                          className="relative flex items-center"
+                      <textarea
+                        value={userChatMessage}
+                        onChange={(e) => setUserChatMessage(e.target.value)}
+                        placeholder="Ask anything about your conversations"
+                        disabled={isGeneratingChat}
+                        rows={2}
+                        className="w-full resize-none bg-transparent text-sm text-[#111111] placeholder-slate-400 outline-none"
+                      />
+                      <div className="flex items-center justify-between pt-2">
+                        <button
+                          type="button"
+                          className="inline-flex items-center gap-2 text-xs font-bold text-slate-600 hover:text-[#135bf1]"
+                          title="Opciones avanzadas"
                         >
-                          <input
-                            type="text"
-                            value={userChatMessage}
-                            onChange={(e) => setUserChatMessage(e.target.value)}
-                            placeholder="Pregunta sobre esta conversacion..."
-                            disabled={isGeneratingChat}
-                            className="w-full bg-[#F4F4F5] pl-3.5 pr-10 py-2 text-xs rounded-xl focus:bg-white outline-none border border-transparent focus:border-[#EBEBEB] text-[#111111] placeholder-slate-450"
-                          />
-                          <button
-                            type="submit"
-                            disabled={isGeneratingChat || !userChatMessage.trim()}
-                            className="absolute right-1.5 w-7 h-7 bg-[#135bf1] hover:bg-[#0746cc] rounded-lg text-white flex items-center justify-center transition-colors cursor-pointer disabled:opacity-40"
-                          >
-                            <Send className="w-3.5 h-3.5 fill-white" />
-                          </button>
-                        </form>
-                      </div>
-
-                    </div>
-                  ) : chatTab === "outline" ? (
-                    <div className="flex-grow p-4 overflow-y-auto text-left space-y-4">
-                      <p className="text-xs font-bold text-[#111111]">Guia de la reunion</p>
-                      <div className="space-y-2.5">
-                        {selectedMeeting.summary.split("\n").filter(l => l.startsWith("##") || l.startsWith("###")).map((sectionHeader, sIdx) => {
-                          const cleanSection = sectionHeader.replace(/^#+\s*/, "");
-                          return (
-                            <div 
-                              key={sIdx} 
-                              className="p-3 bg-white border border-[#E9E9EB] rounded-xl hover:border-[#135bf1]/40 transition-colors cursor-pointer text-xs font-semibold text-[#135bf1]"
-                              onClick={() => {}}
-                            >
-                        {cleanSection}
-                            </div>
-                          );
-                        })}
-                        {selectedMeeting.summary.split("\n").filter(l => l.startsWith("##") || l.startsWith("###")).length === 0 && (
-                          <p className="text-[11px] text-slate-400 italic">No se encontraron titulos estructurados en el resumen.</p>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="flex-grow p-4 text-left space-y-4">
-                      <p className="text-xs font-bold text-[#111111]">Notas del estudiante</p>
-                      <p className="text-[11px] text-slate-500">Agrega comentarios o anotaciones para consolidar el acta.</p>
-                      <div className="space-y-3">
-                        <textarea 
-                          rows={4}
-                          className="w-full p-3 bg-white border border-[#E9E9EB] text-xs rounded-xl focus:outline-none focus:ring-1 focus:ring-[#135bf1]"
-                          placeholder="Escribe un comentario o aclaracion sobre el acta..."
-                        />
-                        <button className="px-4 py-2 bg-[#135bf1] text-white text-xs font-bold rounded-lg hover:bg-[#0746cc]">
-                          Agregar Nota
+                          <Plus className="w-4 h-4" />
+                          Advanced
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={isGeneratingChat || !userChatMessage.trim()}
+                          className="w-9 h-9 rounded-full bg-[#135bf1] hover:bg-[#0746cc] text-white flex items-center justify-center transition-colors disabled:bg-slate-200 disabled:text-slate-400"
+                          title="Enviar pregunta"
+                        >
+                          <Send className="w-4 h-4" />
                         </button>
                       </div>
-                    </div>
-                  )}
-
-                </motion.div>
+                    </form>
+                  </div>
+                </motion.aside>
               )}
             </AnimatePresence>
 
