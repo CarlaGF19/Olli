@@ -10,7 +10,7 @@ import { jsPDF } from "jspdf";
 
 interface AudioRecorderProps {
   onTranscriptionSuccess: (transcription: { id?: string; title: string; transcript: string; summary: string }, durationSec: number) => void;
-  settings: { aiProvider: string; apiKey: string; bypassSizeLimit?: boolean };
+  settings: { aiProvider: string; apiKey?: string; hasApiKey?: boolean; bypassSizeLimit?: boolean };
   onUpdateDraft?: (draft: { id: string; title: string; transcript: string; summary: string; duration: string; isDraft?: boolean; date?: string }) => void;
   initialMode?: "record" | "upload";
 }
@@ -139,8 +139,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
         body: JSON.stringify({
           transcript: currentTranscript,
           messages: chatMessages.filter(m => m.content !== "¡Hola! ..."),
-          userMessage: questionText,
-          apiKey: settings.apiKey
+          userMessage: questionText
         })
       });
 
@@ -188,8 +187,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           transcript: currentTranscript,
-          userMessage: scanPrompt,
-          apiKey: settings.apiKey
+          userMessage: scanPrompt
         })
       });
 
@@ -350,6 +348,11 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
 
     try {
       const audioBlob = new Blob(chunks, { type: "audio/webm" });
+      if (audioBlob.size < 5000) {
+        digitalLiveBusyRef.current = false;
+        setIsDigitalLiveTranscribing(false);
+        return;
+      }
       const audio = await blobToBase64(audioBlob);
       const response = await fetch("/api/transcribe-live", {
         method: "POST",
@@ -357,7 +360,6 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
         body: JSON.stringify({
           audio,
           mimeType: "audio/webm",
-          apiKey: settings.apiKey || "",
         }),
       });
 
@@ -586,7 +588,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
       };
 
       mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start(250);
+      mediaRecorder.start(captureSource === "screen" && digitalLiveEnabled ? 12000 : 250);
 
       isRecordingRef.current = true;
       isPausedRef.current = false;
@@ -768,7 +770,6 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           transcript: cleanText,
-          apiKey: settings.apiKey,
         }),
       });
 
@@ -892,8 +893,6 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
         body: JSON.stringify({
           audio: base64Data,
           mimeType: blob.type || "audio/webm",
-          apiKey: settings.apiKey,
-          aiProvider: settings.aiProvider,
           liveDraftText: liveTranscript,
         }),
       });
@@ -1345,7 +1344,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
                               const next = !digitalLiveEnabled;
                               setDigitalLiveEnabled(next);
                               setSpeechErrorNotice(
-                                next && !settings.apiKey?.trim()
+                                next && !settings.hasApiKey
                                   ? "Para transcribir audio digital en vivo necesitas una API Key de Gemini en Settings."
                                   : null
                               );

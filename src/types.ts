@@ -33,7 +33,8 @@ export interface MeetingFolder {
 
 export interface AppSettings {
   aiProvider: "gemini" | "custom_openai";
-  apiKey: string;
+  apiKey?: string;
+  hasApiKey?: boolean;
   audioFolder: string;
   autoDeleteAudio: boolean;
   bypassSizeLimit?: boolean;

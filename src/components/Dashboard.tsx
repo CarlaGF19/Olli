@@ -39,7 +39,7 @@ export default function Dashboard({
     const summary = meeting.summary.trim().toLowerCase();
     return !summary || summary.includes("borrador guardado en tiempo real") || summary.includes("audio digital capturado localmente");
   }).length;
-  const hasApiKey = Boolean(settings.apiKey?.trim());
+  const hasApiKey = Boolean(settings.hasApiKey);
 
   const cards = [
     {

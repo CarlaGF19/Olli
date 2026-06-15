@@ -101,6 +101,18 @@ async function requireLocalUser(req: express.Request, res: express.Response, nex
   }
 }
 
+async function resolveUserGeminiApiKey(req: express.Request) {
+  const user = (req as any).localUser as PublicLocalUser | undefined;
+  const userSettings = user ? await getSettings(user.uid, true) : null;
+  const localKey = userSettings?.apiKey?.trim();
+  const envKey = process.env.GEMINI_API_KEY?.trim();
+  const resolvedApiKey = isValidGeminiApiKey(localKey) ? localKey : envKey;
+  if (!isValidGeminiApiKey(resolvedApiKey)) {
+    throw new Error("Configura una API Key de Gemini en Settings antes de usar funciones de IA.");
+  }
+  return resolvedApiKey;
+}
+
 // Lazy initializer for Google GenAI client
 let aiClient: GoogleGenAI | null = null;
 function getGeminiClient(): GoogleGenAI {
@@ -238,21 +250,15 @@ app.delete("/api/account", requireLocalUser, async (req, res): Promise<any> => {
 });
 
 // Short live transcription endpoint. It must not summarize or invent context.
-app.post("/api/transcribe-live", async (req, res): Promise<any> => {
+app.post("/api/transcribe-live", requireLocalUser, async (req, res): Promise<any> => {
   try {
-    const { audio, mimeType, apiKey } = req.body;
+    const { audio, mimeType } = req.body;
 
     if (!audio) {
       return res.status(400).json({ error: "Missing audio data in base64 format." });
     }
 
-    const isCustomKeyValid = isValidGeminiApiKey(apiKey);
-    const resolvedApiKey = isCustomKeyValid ? apiKey.trim() : process.env.GEMINI_API_KEY;
-    if (!isValidGeminiApiKey(resolvedApiKey)) {
-      return res.status(400).json({
-        error: "No se ha configurado una API Key de Gemini valida. Guardala en Settings para usar transcripcion IA."
-      });
-    }
+    const resolvedApiKey = await resolveUserGeminiApiKey(req);
 
     let cleanBase64 = audio;
     if (audio.includes(";base64,")) {
@@ -328,9 +334,9 @@ app.post("/api/transcribe-live", async (req, res): Promise<any> => {
 });
 
 // Transcribe and analyze audio
-app.post("/api/transcribe", async (req, res): Promise<any> => {
+app.post("/api/transcribe", requireLocalUser, async (req, res): Promise<any> => {
   try {
-    const { audio, mimeType, aiProvider, promptOverride, apiKey, liveDraftText } = req.body;
+    const { audio, mimeType, promptOverride, liveDraftText } = req.body;
 
     if (!audio) {
       return res.status(400).json({ error: "Missing audio data in base64 format." });
@@ -341,14 +347,7 @@ app.post("/api/transcribe", async (req, res): Promise<any> => {
     
     // Resolve which API key to use - request's configured key overrides process.env
     // Only use custom client key if it is non-empty and valid
-    const isCustomKeyValid = isValidGeminiApiKey(apiKey);
-    const resolvedApiKey = isCustomKeyValid ? apiKey.trim() : process.env.GEMINI_API_KEY;
-    if (!isValidGeminiApiKey(resolvedApiKey)) {
-      return res.status(400).json({
-        error: "No se ha configurado una API Key de Gemini válida. Por favor, ingresa tu API Key en la sección de configuración lateral (Settings -> API Configuration) o configúrala en Google AI Studio (añadiendo GEMINI_API_KEY como secret)."
-      });
-    }
-
+    const resolvedApiKey = await resolveUserGeminiApiKey(req);
     // Create a dynamic client for this request using the resolved key
     const ai = new GoogleGenAI({
       apiKey: resolvedApiKey,
@@ -434,23 +433,15 @@ Specifically, generate:
 });
 
 // Summarize a text transcript (lightweight and robust to bypass Vercel timeout errors)
-app.post("/api/summarize-text", async (req, res): Promise<any> => {
+app.post("/api/summarize-text", requireLocalUser, async (req, res): Promise<any> => {
   try {
-    const { transcript, apiKey } = req.body;
+    const { transcript } = req.body;
 
     if (!transcript) {
       return res.status(400).json({ error: "No se proporcionó texto de transcripción para resumir." });
     }
 
-    // Resolve which API key to use
-    const isCustomKeyValid = isValidGeminiApiKey(apiKey);
-    const resolvedApiKey = isCustomKeyValid ? apiKey.trim() : process.env.GEMINI_API_KEY;
-    if (!isValidGeminiApiKey(resolvedApiKey)) {
-      return res.status(400).json({
-        error: "No se ha configurado una API Key de Gemini válida. Por favor, ingresa tu API Key en la sección de configuración lateral (Settings -> API Configuration) o configúrala en Google AI Studio (añadiendo GEMINI_API_KEY como secret)."
-      });
-    }
-
+    const resolvedApiKey = await resolveUserGeminiApiKey(req);
     const ai = new GoogleGenAI({
       apiKey: resolvedApiKey,
       httpOptions: {
@@ -511,9 +502,9 @@ Specifically, generate:
 });
 
 // Interactive AI Chat Assistant for meeting notes answering questions about transcript
-app.post("/api/chat", async (req, res): Promise<any> => {
+app.post("/api/chat", requireLocalUser, async (req, res): Promise<any> => {
   try {
-    const { transcript, messages, userMessage, apiKey } = req.body;
+    const { transcript, messages, userMessage } = req.body;
 
     if (!transcript) {
       return res.status(400).json({ error: "No se proporcionó contexto de transcripción para chatear." });
@@ -522,14 +513,7 @@ app.post("/api/chat", async (req, res): Promise<any> => {
       return res.status(400).json({ error: "No se proporcionó un mensaje del usuario." });
     }
 
-    const isCustomKeyValid = isValidGeminiApiKey(apiKey);
-    const resolvedApiKey = isCustomKeyValid ? apiKey.trim() : process.env.GEMINI_API_KEY;
-    if (!isValidGeminiApiKey(resolvedApiKey)) {
-      return res.status(400).json({
-        error: "No se ha configurado una API Key de Gemini válida. Por favor, ingresa tu API Key en la sección de configuración lateral (Settings -> API Configuration) o configúrala en Google AI Studio (añadiendo GEMINI_API_KEY como secret)."
-      });
-    }
-
+    const resolvedApiKey = await resolveUserGeminiApiKey(req);
     const ai = new GoogleGenAI({
       apiKey: resolvedApiKey,
       httpOptions: {
@@ -766,3 +750,5 @@ configureServer().catch((err) => {
 });
 
 export default app;
+
+

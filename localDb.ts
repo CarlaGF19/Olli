@@ -21,7 +21,8 @@ export type PublicLocalUser = {
 
 export type LocalSettings = {
   aiProvider: "gemini" | "custom_openai";
-  apiKey: string;
+  apiKey?: string;
+  hasApiKey?: boolean;
   audioFolder: string;
   autoDeleteAudio: boolean;
   bypassSizeLimit?: boolean;
@@ -516,13 +517,14 @@ export async function deleteMeetingFolder(userId: string, folderId: string) {
   persist(db);
 }
 
-export async function getSettings(userId: string): Promise<LocalSettings> {
+export async function getSettings(userId: string, includeSecret = false): Promise<LocalSettings> {
   const db = await getDb();
   const row = getSingle<any>(db, "SELECT * FROM settings WHERE user_id = ?", [userId]);
   if (!row) return defaultSettings();
   return {
     aiProvider: row.ai_provider || "gemini",
-    apiKey: row.api_key || "",
+    apiKey: includeSecret ? row.api_key || "" : "",
+    hasApiKey: !!row.api_key,
     audioFolder: row.audio_folder || "/MeetingBrain/Vault/",
     autoDeleteAudio: !!row.auto_delete_audio,
     bypassSizeLimit: !!row.bypass_size_limit,
@@ -532,7 +534,7 @@ export async function getSettings(userId: string): Promise<LocalSettings> {
 export async function saveSettings(userId: string, settings: LocalSettings) {
   const db = await getDb();
   const timestamp = nowIso();
-  const existing = getSingle(db, "SELECT user_id, created_at FROM settings WHERE user_id = ?", [userId]);
+  const existing = getSingle<any>(db, "SELECT user_id, created_at, api_key FROM settings WHERE user_id = ?", [userId]);
   db.run(
     `INSERT OR REPLACE INTO settings
       (user_id, ai_provider, api_key, audio_folder, auto_delete_audio, bypass_size_limit, created_at, updated_at)
@@ -540,7 +542,7 @@ export async function saveSettings(userId: string, settings: LocalSettings) {
     [
       userId,
       settings.aiProvider || "gemini",
-      settings.apiKey || "",
+      settings.apiKey !== undefined ? settings.apiKey || "" : existing?.api_key || "",
       settings.audioFolder || "/MeetingBrain/Vault/",
       settings.autoDeleteAudio ? 1 : 0,
       settings.bypassSizeLimit ? 1 : 0,

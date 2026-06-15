@@ -181,32 +181,11 @@ export default function App() {
       try {
         const cloudSettings = await fetchUserSettings(user.uid);
         if (cloudSettings) {
-          const loaded = {
-            ...cloudSettings,
-            apiKey: cloudSettings.apiKey || "",
-          };
-          setSettings(loaded);
-          if (!cloudSettings.apiKey) {
-            await saveUserSettingsToCloud(user.uid, loaded);
-          }
+          setSettings({ ...cloudSettings, apiKey: "" });
         } else {
-          const savedSettings = localStorage.getItem(`mb_settings_${user.uid}`);
-          if (savedSettings) {
-            const parsed = JSON.parse(savedSettings);
-            const loaded = {
-              ...parsed,
-              apiKey: parsed.apiKey || "",
-            };
-            setSettings(loaded);
-            await saveUserSettingsToCloud(user.uid, loaded);
-          } else {
-            const cleanSettings = {
-              ...settings,
-              apiKey: "",
-            };
-            setSettings(cleanSettings);
-            await saveUserSettingsToCloud(user.uid, cleanSettings);
-          }
+          const cleanSettings = { ...settings, apiKey: "", hasApiKey: false };
+          setSettings(cleanSettings);
+          await saveUserSettingsToCloud(user.uid, cleanSettings);
         }
       } catch (err) {
         console.error("Error loading cloud settings:", err);
@@ -273,16 +252,18 @@ export default function App() {
   };
 
   const handleSaveSettings = async (newSettings: AppSettings) => {
-    setSettings(newSettings);
+    const nextSettings = {
+      ...newSettings,
+      hasApiKey: newSettings.apiKey?.trim() ? true : newSettings.hasApiKey,
+      apiKey: "",
+    };
+    setSettings(nextSettings);
     if (user) {
-      localStorage.setItem(`mb_settings_${user.uid}`, JSON.stringify(newSettings));
       try {
         await saveUserSettingsToCloud(user.uid, newSettings);
       } catch (err) {
         console.error("Failed to sync settings with Cloud:", err);
       }
-    } else {
-      localStorage.setItem("mb_settings", JSON.stringify(newSettings));
     }
   };
 
@@ -496,7 +477,7 @@ export default function App() {
   }
 
   const shouldShowApiSetupModal =
-    (!settings.apiKey || settings.apiKey.trim() === "") && !onboardingSkipped && isFirstTimeUser;
+    !settings.hasApiKey && !onboardingSkipped && isFirstTimeUser;
 
   return (
     <div className="min-h-screen bg-white flex text-slate-900 font-sans antialiased overflow-x-hidden">
@@ -673,8 +654,8 @@ export default function App() {
               localStorage.setItem(`onboarding_skipped_v1_${user.uid}`, "true");
             }}
             onSaveApiKey={async (key) => {
-              const updatedSettings = { ...settings, apiKey: key };
-              setSettings(updatedSettings);
+              const updatedSettings = { ...settings, apiKey: key, hasApiKey: true };
+              setSettings({ ...updatedSettings, apiKey: "" });
               await saveUserSettingsToCloud(user.uid, updatedSettings);
               setIsFirstTimeUser(false);
               localStorage.removeItem(`onboarding_new_user_v1_${user.uid}`);

@@ -156,21 +156,11 @@ Puedes pedirme decisiones, tareas, resumen ejecutivo o preguntas sobre la transc
     setSummarizationError("");
 
     try {
-      const storedSettingsStr = localStorage.getItem("meeting_brain_settings");
-      let customApiKey = "";
-      if (storedSettingsStr) {
-        try {
-          const stored = JSON.parse(storedSettingsStr);
-          customApiKey = stored.apiKey || "";
-        } catch (e) {}
-      }
-
       const response = await fetch("/api/summarize-text", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           transcript: meeting.transcript,
-          apiKey: customApiKey,
         }),
       });
 
@@ -519,15 +509,6 @@ ${meeting.transcript}
     }));
 
     try {
-      const storedSettingsStr = localStorage.getItem("meeting_brain_settings");
-      let customApiKey = "";
-      if (storedSettingsStr) {
-        try {
-          const stored = JSON.parse(storedSettingsStr);
-          customApiKey = stored.apiKey || "";
-        } catch (e) {}
-      }
-
       const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -535,7 +516,6 @@ ${meeting.transcript}
           transcript: selectedMeeting.transcript,
           messages: updatedHistory.slice(-10).map(m => ({ role: m.role, content: m.content })),
           userMessage: questionText,
-          apiKey: customApiKey,
         })
       });
 

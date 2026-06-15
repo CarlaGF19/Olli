@@ -42,7 +42,7 @@ export default function SettingsPanel({
   const [activeSubTab, setActiveSubTab] = useState<"general" | "api" | "integrations" | "security">(defaultTab);
   
   const [aiProvider, setAiProvider] = useState<"gemini" | "custom_openai">(settings.aiProvider);
-  const [apiKey, setApiKey] = useState(settings.apiKey);
+  const [apiKey, setApiKey] = useState("");
   const [audioFolder, setAudioFolder] = useState(settings.audioFolder);
   const [autoDeleteAudio, setAutoDeleteAudio] = useState(settings.autoDeleteAudio);
   const [bypassSizeLimit, setBypassSizeLimit] = useState(settings.bypassSizeLimit ?? false);
@@ -63,6 +63,7 @@ export default function SettingsPanel({
     onSaveSettings({
       aiProvider,
       apiKey,
+      hasApiKey: apiKey.trim() ? true : settings.hasApiKey,
       audioFolder,
       autoDeleteAudio,
       bypassSizeLimit,
@@ -317,7 +318,7 @@ export default function SettingsPanel({
                     type={showPassword ? "text" : "password"}
                     value={apiKey}
                     onChange={(e) => setApiKey(e.target.value)}
-                    placeholder={apiKey ? "••••••••••••••••••••••••••••••••" : "Por favor, ingresa tu API Key"}
+                    placeholder={settings.hasApiKey ? "Clave guardada en SQLite. Escribe una nueva solo si deseas reemplazarla." : "Por favor, ingresa tu API Key"}
                     className="w-full pl-11 pr-11 py-2.5 bg-slate-50 border border-slate-200 focus:bg-white text-xs font-mono rounded-xl outline-none focus:border-[#135bf1] transition-all text-slate-800"
                   />
                   <button
@@ -539,3 +540,4 @@ export default function SettingsPanel({
     </div>
   );
 }
+
