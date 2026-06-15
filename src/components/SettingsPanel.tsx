@@ -60,14 +60,19 @@ export default function SettingsPanel({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onSaveSettings({
+    const nextSettings: AppSettings = {
       aiProvider,
-      apiKey,
       hasApiKey: apiKey.trim() ? true : settings.hasApiKey,
       audioFolder,
       autoDeleteAudio,
       bypassSizeLimit,
-    });
+    };
+
+    if (apiKey.trim()) {
+      nextSettings.apiKey = apiKey.trim();
+    }
+
+    onSaveSettings(nextSettings);
     
     setShowStatus(true);
     setTimeout(() => {

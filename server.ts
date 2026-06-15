@@ -1,6 +1,8 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import os from "os";
+import { execFile } from "child_process";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
 import nodemailer from "nodemailer";
@@ -56,6 +58,7 @@ dotenv.config();
 
 const app = express();
 const PORT = 3000;
+const LOCAL_STT_DIR = path.join(os.tmpdir(), "meetbrain-local-stt");
 
 // Set maximum request size to support larger audio file uploads
 app.use(express.json({ limit: "100mb" }));
@@ -86,6 +89,39 @@ function setSessionCookie(res: express.Response, token: string) {
 
 function clearSessionCookie(res: express.Response) {
   res.clearCookie(SESSION_COOKIE, { path: "/" });
+}
+
+function parseCommandArgs(raw: string) {
+  const matches = raw.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
+  return matches.map((item) => item.replace(/^"|"$/g, ""));
+}
+
+function getLocalSttConfig() {
+  const command = process.env.LOCAL_STT_COMMAND?.trim();
+  const argsTemplate = process.env.LOCAL_STT_ARGS?.trim() || "{input}";
+  return {
+    command,
+    argsTemplate,
+    configured: !!command,
+  };
+}
+
+function runLocalTranscriber(inputPath: string): Promise<string> {
+  const config = getLocalSttConfig();
+  if (!config.command) {
+    throw new Error("Motor local de transcripcion no configurado. Define LOCAL_STT_COMMAND y LOCAL_STT_ARGS en .env.");
+  }
+
+  const args = parseCommandArgs(config.argsTemplate).map((arg) => arg.replace(/\{input\}/g, inputPath));
+  return new Promise((resolve, reject) => {
+    execFile(config.command, args, { timeout: 120000, windowsHide: true, maxBuffer: 1024 * 1024 * 4 }, (error, stdout, stderr) => {
+      if (error) {
+        reject(new Error(stderr?.trim() || error.message || "Fallo el motor local de transcripcion."));
+        return;
+      }
+      resolve(stdout.trim());
+    });
+  });
 }
 
 async function requireLocalUser(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -249,6 +285,52 @@ app.delete("/api/account", requireLocalUser, async (req, res): Promise<any> => {
   return res.json({ ok: true });
 });
 
+app.get("/api/local-transcribe/status", requireLocalUser, async (req, res): Promise<any> => {
+  const config = getLocalSttConfig();
+  return res.json({
+    configured: config.configured,
+    command: config.configured ? path.basename(config.command || "") : "",
+  });
+});
+
+app.post("/api/local-transcribe-live", requireLocalUser, async (req, res): Promise<any> => {
+  let inputPath = "";
+  try {
+    const { audio, mimeType } = req.body;
+    if (!audio) {
+      return res.status(400).json({ error: "Falta audio para transcribir localmente." });
+    }
+
+    let cleanBase64 = String(audio);
+    if (cleanBase64.includes(";base64,")) {
+      cleanBase64 = cleanBase64.split(";base64,")[1];
+    }
+
+    const ext = String(mimeType || "").includes("wav") ? "wav" : "webm";
+    fs.mkdirSync(LOCAL_STT_DIR, { recursive: true });
+    inputPath = path.join(LOCAL_STT_DIR, `segment-${Date.now()}-${Math.random().toString(16).slice(2)}.${ext}`);
+    fs.writeFileSync(inputPath, Buffer.from(cleanBase64, "base64"));
+
+    const transcript = (await runLocalTranscriber(inputPath))
+      .replace(/\[[^\]]+\]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    return res.json({
+      transcript,
+      hasSpeech: transcript.length > 0,
+    });
+  } catch (error: any) {
+    return res.status(500).json({
+      error: error.message || "No se pudo transcribir con el motor local.",
+    });
+  } finally {
+    if (inputPath) {
+      fs.promises.unlink(inputPath).catch(() => {});
+    }
+  }
+});
+
 // Short live transcription endpoint. It must not summarize or invent context.
 app.post("/api/transcribe-live", requireLocalUser, async (req, res): Promise<any> => {
   try {
@@ -337,9 +419,66 @@ app.post("/api/transcribe-live", requireLocalUser, async (req, res): Promise<any
 app.post("/api/transcribe", requireLocalUser, async (req, res): Promise<any> => {
   try {
     const { audio, mimeType, promptOverride, liveDraftText } = req.body;
+    const liveDraft = typeof liveDraftText === "string" ? liveDraftText.trim() : "";
 
     if (!audio) {
       return res.status(400).json({ error: "Missing audio data in base64 format." });
+    }
+
+    if (liveDraft.length > 0) {
+      try {
+        const resolvedApiKey = await resolveUserGeminiApiKey(req);
+        const ai = new GoogleGenAI({
+          apiKey: resolvedApiKey,
+          httpOptions: {
+            headers: {
+              "User-Agent": "meetbrain-local",
+            },
+          },
+        });
+
+        const response = await ai.models.generateContent({
+          model: "gemini-3.5-flash",
+          contents:
+            "Resume esta transcripcion local en espanol. No corrijas inventando datos que no esten en el texto. " +
+            "Extrae puntos clave y tareas solo si aparecen claramente.\n\n" +
+            liveDraft,
+          config: {
+            systemInstruction:
+              "You summarize local speech transcripts. Never invent missing transcript content. Keep the output in Spanish.",
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                title: {
+                  type: Type.STRING,
+                  description: "Short Spanish title for the session.",
+                },
+                summary: {
+                  type: Type.STRING,
+                  description: "Markdown summary in Spanish with key points and tasks when present.",
+                },
+              },
+              required: ["title", "summary"],
+            },
+          },
+        });
+
+        const result = response.text ? JSON.parse(response.text) : {};
+        return res.json({
+          title: result.title || "Transcripcion local",
+          transcript: liveDraft,
+          summary: result.summary || "Transcripcion capturada localmente. No se genero resumen automatico.",
+        });
+      } catch (summaryError: any) {
+        console.warn("Local draft summary skipped:", summaryError?.message || summaryError);
+        return res.json({
+          title: "Transcripcion local",
+          transcript: liveDraft,
+          summary:
+            "Transcripcion capturada localmente. No se genero resumen automatico porque Gemini no esta configurado, no tiene cuota disponible o devolvio un error.",
+        });
+      }
     }
 
     // Default MIME type if not provided

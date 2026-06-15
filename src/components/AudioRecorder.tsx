@@ -252,6 +252,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
   const digitalLiveChunksRef = useRef<Blob[]>([]);
   const digitalLiveLastFlushRef = useRef(0);
   const digitalLiveBusyRef = useRef(false);
+  const digitalLiveEnabledRef = useRef(false);
 
   const durationRef = useRef(0);
   const captureSourceRef = useRef<"mic" | "screen">("mic");
@@ -259,6 +260,10 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
   useEffect(() => {
     captureSourceRef.current = captureSource;
   }, [captureSource]);
+
+  useEffect(() => {
+    digitalLiveEnabledRef.current = digitalLiveEnabled;
+  }, [digitalLiveEnabled]);
 
   useEffect(() => {
     stopRecordingRef.current = stopRecording;
@@ -334,7 +339,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
   };
 
   const flushDigitalLiveTranscript = async (force = false) => {
-    if (!digitalLiveEnabled || captureSourceRef.current !== "screen") return;
+    if (!digitalLiveEnabledRef.current || captureSourceRef.current !== "screen") return;
     if (digitalLiveBusyRef.current) return;
     if (digitalLiveChunksRef.current.length === 0) return;
 
@@ -354,7 +359,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
         return;
       }
       const audio = await blobToBase64(audioBlob);
-      const response = await fetch("/api/transcribe-live", {
+      const response = await fetch("/api/local-transcribe-live", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -365,7 +370,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || "No se pudo transcribir este segmento de audio digital.");
+        throw new Error(data.error || "No se pudo transcribir este segmento con el motor local.");
       }
 
       const data = await response.json();
@@ -382,6 +387,30 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
       digitalLiveBusyRef.current = false;
       setIsDigitalLiveTranscribing(false);
     }
+  };
+
+  const toggleDigitalLiveTranscription = async () => {
+    const next = !digitalLiveEnabledRef.current;
+
+    if (next) {
+      const status = await fetch("/api/local-transcribe/status")
+        .then((r) => r.json())
+        .catch(() => ({ configured: false }));
+
+      if (!status.configured) {
+        setSpeechErrorNotice("Motor local de transcripcion no configurado. Instala Whisper local y define LOCAL_STT_COMMAND en .env.");
+        return;
+      }
+
+      digitalLiveChunksRef.current = [];
+      digitalLiveLastFlushRef.current = 0;
+    } else {
+      await flushDigitalLiveTranscript(true);
+    }
+
+    digitalLiveEnabledRef.current = next;
+    setDigitalLiveEnabled(next);
+    setSpeechErrorNotice(null);
   };
 
   // 1. Voice Visualizer
@@ -554,7 +583,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           audioChunksRef.current.push(event.data);
-          if (captureSourceRef.current === "screen" && digitalLiveEnabled) {
+          if (captureSourceRef.current === "screen" && digitalLiveEnabledRef.current) {
             digitalLiveChunksRef.current.push(event.data);
             flushDigitalLiveTranscript(false);
           }
@@ -588,7 +617,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
       };
 
       mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start(captureSource === "screen" && digitalLiveEnabled ? 12000 : 250);
+      mediaRecorder.start(1000);
 
       isRecordingRef.current = true;
       isPausedRef.current = false;
@@ -1335,28 +1364,20 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
                           <div>
                             <p className="text-xs font-bold text-slate-800">Audio digital de pestaÃ±a</p>
                             <p className="text-[11px] text-slate-500 leading-relaxed mt-1">
-                              Activa texto en vivo solo si necesitas leer lo que dice la clase. Usa Gemini por segmentos.
+                              Activa texto en vivo solo si tienes un motor local de transcripcion instalado.
                             </p>
                           </div>
                           <button
                             type="button"
-                            onClick={() => {
-                              const next = !digitalLiveEnabled;
-                              setDigitalLiveEnabled(next);
-                              setSpeechErrorNotice(
-                                next && !settings.hasApiKey
-                                  ? "Para transcribir audio digital en vivo necesitas una API Key de Gemini en Settings."
-                                  : null
-                              );
-                            }}
+                            onClick={toggleDigitalLiveTranscription}
                             className={`w-12 h-6 rounded-full p-0.5 transition-colors ${digitalLiveEnabled ? "bg-[#135bf1]" : "bg-slate-200"}`}
-                            title="Activar transcripcion IA en vivo"
+                            title="Activar transcripcion local en vivo"
                           >
                             <span className={`block w-5 h-5 rounded-full bg-white shadow transition-transform ${digitalLiveEnabled ? "translate-x-6" : "translate-x-0"}`} />
                           </button>
                         </div>
                         <div className="mt-3 text-[10px] font-semibold text-slate-400">
-                          {digitalLiveEnabled ? "IA en vivo activada: veras texto despues de unos segundos." : "Solo grabar audio: no mostrara palabras durante la captura."}
+                          {digitalLiveEnabled ? "Transcripcion local activada: veras texto despues de unos segundos." : "Solo grabar audio: no mostrara palabras durante la captura."}
                         </div>
                       </div>
                     )}
@@ -1482,9 +1503,25 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
                           <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse inline-block" />
                           <span>Transcripcion de clase en vivo</span>
                         </div>
-                        <span className="text-[10px] bg-[#135bf1]/5 border border-[#135bf1]/10 px-2 py-0.5 rounded-md font-bold text-[#135bf1]">
-                          {draftWordCount} palabras
-                        </span>
+                        <div className="flex items-center gap-2">
+                          {captureSource === "screen" && (
+                            <button
+                              type="button"
+                              onClick={toggleDigitalLiveTranscription}
+                              className={`px-2.5 py-1 rounded-lg border text-[9px] font-extrabold uppercase tracking-wider transition-colors ${
+                                digitalLiveEnabled
+                                  ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+                                  : "bg-slate-50 border-slate-200 text-slate-500"
+                              }`}
+                              title="Activar o pausar la transcripcion local en vivo"
+                            >
+                              Local STT {digitalLiveEnabled ? "ON" : "OFF"}
+                            </button>
+                          )}
+                          <span className="text-[10px] bg-[#135bf1]/5 border border-[#135bf1]/10 px-2 py-0.5 rounded-md font-bold text-[#135bf1]">
+                            {draftWordCount} palabras
+                          </span>
+                        </div>
                       </div>
                       
                       {/* Live Feed Dialog Scroll Window */}
@@ -1514,7 +1551,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
                                 <div className="space-y-2 bg-transparent pr-1">
                                   <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-emerald-50 border border-emerald-100 rounded-lg text-[9.5px] font-bold text-emerald-700 uppercase tracking-wider mb-2">
                                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                    <span>Transcripcion IA en vivo</span>
+                                    <span>Transcripcion local en vivo</span>
                                   </div>
                                   <div className="text-slate-800 font-normal whitespace-pre-wrap text-justify [text-wrap:pretty]">{liveTranscript}</div>
                                 </div>
@@ -1526,8 +1563,8 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
                                   </span>
                                   <span className="text-[11px] font-medium text-slate-400 text-center leading-relaxed">
                                     {digitalLiveEnabled
-                                      ? "La app esta escuchando segmentos. Si hay voz clara, el texto aparecera aqui en unos segundos."
-                                      : "La app esta grabando el audio localmente. Activa la transcripcion IA en vivo antes de grabar si necesitas ver palabras durante la captura."}
+                                      ? "La app esta enviando segmentos al motor local. Si hay voz clara, el texto aparecera aqui."
+                                      : "La app esta grabando el audio localmente. Activa la transcripcion local antes de grabar si necesitas ver palabras durante la captura."}
                                   </span>
                                 </div>
                               ) : liveTranscript || interimTranscript ? (
