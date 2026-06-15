@@ -369,6 +369,73 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
     return merged;
   };
 
+  const getPcmStats = (audio: Float32Array) => {
+    let sumSquares = 0;
+    let peak = 0;
+
+    for (let i = 0; i < audio.length; i += 1) {
+      const value = Math.abs(audio[i]);
+      sumSquares += audio[i] * audio[i];
+      if (value > peak) peak = value;
+    }
+
+    return {
+      rms: Math.sqrt(sumSquares / Math.max(1, audio.length)),
+      peak,
+    };
+  };
+
+  const looksLikeWhisperLoop = (text: string) => {
+    const words = text.toLowerCase().split(/\s+/).filter(Boolean);
+    if (words.length < 24) return false;
+
+    const uniqueRatio = new Set(words).size / words.length;
+    if (uniqueRatio < 0.34) return true;
+
+    const grams = new Map<string, number>();
+    for (let size = 3; size <= 6; size += 1) {
+      grams.clear();
+      for (let i = 0; i <= words.length - size; i += 1) {
+        const key = words.slice(i, i + size).join(" ");
+        const count = (grams.get(key) || 0) + 1;
+        if (count >= 3) return true;
+        grams.set(key, count);
+      }
+    }
+
+    return false;
+  };
+
+  const cleanWhisperSegment = (text: string) => {
+    const cleaned = text.replace(/\s+/g, " ").trim();
+    if (!cleaned) return "";
+    if (looksLikeWhisperLoop(cleaned)) return "";
+
+    const words = cleaned.split(/\s+/).filter(Boolean);
+    if (words.length > 120) return "";
+
+    return cleaned;
+  };
+
+  const appendTranscriptSegment = (segment: string) => {
+    const previous = liveTranscriptRef.current.trim();
+    if (!previous) return segment;
+
+    const previousWords = previous.split(/\s+/);
+    const segmentWords = segment.split(/\s+/);
+    const maxOverlap = Math.min(14, previousWords.length, segmentWords.length);
+
+    for (let overlap = maxOverlap; overlap >= 4; overlap -= 1) {
+      const previousTail = previousWords.slice(-overlap).join(" ").toLowerCase();
+      const segmentHead = segmentWords.slice(0, overlap).join(" ").toLowerCase();
+      if (previousTail === segmentHead) {
+        return segmentWords.slice(overlap).join(" ");
+      }
+    }
+
+    return segment;
+  };
+
   const flushDigitalLiveTranscript = async (force = false) => {
     if (!digitalLiveEnabledRef.current || captureSourceRef.current !== "screen") return;
     if (digitalLiveBusyRef.current) return;
@@ -384,18 +451,28 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
       setSpeechErrorNotice(null);
 
       try {
-      const minSamples = Math.round(digitalLiveSampleRateRef.current * 1.5);
+      const minSamples = Math.round(digitalLiveSampleRateRef.current * (force ? 3 : 6));
       if (audio.length < minSamples) {
         digitalLiveBusyRef.current = false;
         setIsDigitalLiveTranscribing(false);
         return;
       }
-      const transcript = (await transcribePcmInBrowser(audio, digitalLiveSampleRateRef.current)).trim();
+      const stats = getPcmStats(audio);
+      if (stats.rms < 0.006 || stats.peak < 0.025) {
+        setDigitalAudioDebug("Audio muy bajo para transcribir · sube volumen de la pestana");
+        return;
+      }
+
+      const transcript = cleanWhisperSegment(await transcribePcmInBrowser(audio, digitalLiveSampleRateRef.current));
       if (transcript) {
-        const nextText = `${liveTranscriptRef.current ? `${liveTranscriptRef.current.trim()} ` : ""}${transcript}`.trim();
+        const segment = appendTranscriptSegment(transcript);
+        if (!segment.trim()) return;
+        const nextText = `${liveTranscriptRef.current ? `${liveTranscriptRef.current.trim()} ` : ""}${segment}`.trim();
         liveTranscriptRef.current = `${nextText} `;
         setLiveTranscript(liveTranscriptRef.current);
         setDraftWordCount(nextText.split(/\s+/).filter(Boolean).length);
+      } else {
+        setDigitalAudioDebug("Segmento descartado por repeticion o ruido");
       }
     } catch (error: any) {
       const message = error.message || "No se pudo transcribir el audio digital con Whisper local.";

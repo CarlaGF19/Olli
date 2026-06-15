@@ -7,7 +7,7 @@ type WorkerRequest =
   | { id: number; type: "transcribe"; audio: Float32Array };
 
 const ctx: DedicatedWorkerGlobalScope = self as any;
-const MODEL_ID = "Xenova/whisper-tiny";
+const MODEL_ID = "Xenova/whisper-base";
 
 env.allowLocalModels = false;
 env.useBrowserCache = true;
@@ -46,8 +46,12 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
     const output = await transcriber(event.data.audio, {
       language: "spanish",
       task: "transcribe",
-      chunk_length_s: 20,
-      stride_length_s: 4,
+      chunk_length_s: 30,
+      stride_length_s: 2,
+      max_new_tokens: 96,
+      no_repeat_ngram_size: 5,
+      repetition_penalty: 1.2,
+      temperature: 0,
     });
 
     const transcript = Array.isArray(output)
