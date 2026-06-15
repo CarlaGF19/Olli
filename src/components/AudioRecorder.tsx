@@ -7,6 +7,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { Mic, Square, Play, Pause, UploadCloud, FileAudio, AlertCircle, Sparkles, Brain, Tv, Volume2, FileDown, Check, Send, HelpCircle, GraduationCap, Search, ArrowRight, Loader2, Cpu } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { jsPDF } from "jspdf";
+import { isBrowserWhisperSupported, transcribeAudioInBrowser, warmupBrowserWhisper } from "../lib/browserWhisper";
 
 interface AudioRecorderProps {
   onTranscriptionSuccess: (transcription: { id?: string; title: string; transcript: string; summary: string }, durationSec: number) => void;
@@ -358,23 +359,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
         setIsDigitalLiveTranscribing(false);
         return;
       }
-      const audio = await blobToBase64(audioBlob);
-      const response = await fetch("/api/local-transcribe-live", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          audio,
-          mimeType: "audio/webm",
-        }),
-      });
-
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || "No se pudo transcribir este segmento con el motor local.");
-      }
-
-      const data = await response.json();
-      const transcript = typeof data.transcript === "string" ? data.transcript.trim() : "";
+      const transcript = (await transcribeAudioInBrowser(audioBlob)).trim();
       if (transcript) {
         const nextText = `${liveTranscriptRef.current ? `${liveTranscriptRef.current.trim()} ` : ""}${transcript}`.trim();
         liveTranscriptRef.current = `${nextText} `;
@@ -382,7 +367,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
         setDraftWordCount(nextText.split(/\s+/).filter(Boolean).length);
       }
     } catch (error: any) {
-      setSpeechErrorNotice(error.message || "No se pudo transcribir el audio digital en vivo.");
+      setSpeechErrorNotice(error.message || "No se pudo transcribir el audio digital con Whisper local.");
     } finally {
       digitalLiveBusyRef.current = false;
       setIsDigitalLiveTranscribing(false);
@@ -393,15 +378,13 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
     const next = !digitalLiveEnabledRef.current;
 
     if (next) {
-      const status = await fetch("/api/local-transcribe/status")
-        .then((r) => r.json())
-        .catch(() => ({ configured: false }));
-
-      if (!status.configured) {
-        setSpeechErrorNotice("Motor local de transcripcion no configurado. Instala Whisper local y define LOCAL_STT_COMMAND en .env.");
+      if (!isBrowserWhisperSupported()) {
+        setSpeechErrorNotice("Este navegador no soporta Whisper local dentro de la web. Usa Chrome o Microsoft Edge actualizado.");
         return;
       }
 
+      setSpeechErrorNotice("Cargando Whisper local dentro de la web. La primera vez puede tardar mientras se descarga el modelo.");
+      await warmupBrowserWhisper();
       digitalLiveChunksRef.current = [];
       digitalLiveLastFlushRef.current = 0;
     } else {
@@ -1364,14 +1347,14 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
                           <div>
                             <p className="text-xs font-bold text-slate-800">Audio digital de pestaÃ±a</p>
                             <p className="text-[11px] text-slate-500 leading-relaxed mt-1">
-                              Activa texto en vivo solo si tienes un motor local de transcripcion instalado.
+                              Activa Whisper dentro de la web para ver texto en vivo sin usar Gemini.
                             </p>
                           </div>
                           <button
                             type="button"
                             onClick={toggleDigitalLiveTranscription}
                             className={`w-12 h-6 rounded-full p-0.5 transition-colors ${digitalLiveEnabled ? "bg-[#135bf1]" : "bg-slate-200"}`}
-                            title="Activar transcripcion local en vivo"
+                            title="Activar Whisper en vivo dentro de la web"
                           >
                             <span className={`block w-5 h-5 rounded-full bg-white shadow transition-transform ${digitalLiveEnabled ? "translate-x-6" : "translate-x-0"}`} />
                           </button>
@@ -1513,9 +1496,9 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
                                   ? "bg-emerald-50 border-emerald-200 text-emerald-700"
                                   : "bg-slate-50 border-slate-200 text-slate-500"
                               }`}
-                              title="Activar o pausar la transcripcion local en vivo"
+                              title="Activar o pausar Whisper en vivo dentro de la web"
                             >
-                              Local STT {digitalLiveEnabled ? "ON" : "OFF"}
+                              Whisper {digitalLiveEnabled ? "ON" : "OFF"}
                             </button>
                           )}
                           <span className="text-[10px] bg-[#135bf1]/5 border border-[#135bf1]/10 px-2 py-0.5 rounded-md font-bold text-[#135bf1]">
@@ -1563,8 +1546,8 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
                                   </span>
                                   <span className="text-[11px] font-medium text-slate-400 text-center leading-relaxed">
                                     {digitalLiveEnabled
-                                      ? "La app esta enviando segmentos al motor local. Si hay voz clara, el texto aparecera aqui."
-                                      : "La app esta grabando el audio localmente. Activa la transcripcion local antes de grabar si necesitas ver palabras durante la captura."}
+                                      ? "Whisper esta procesando segmentos dentro del navegador. Si hay voz clara, el texto aparecera aqui."
+                                      : "La app esta grabando el audio localmente. Activa Whisper si necesitas ver palabras durante la captura."}
                                   </span>
                                 </div>
                               ) : liveTranscript || interimTranscript ? (

@@ -1,8 +1,6 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import os from "os";
-import { execFile } from "child_process";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
 import nodemailer from "nodemailer";
@@ -58,7 +56,6 @@ dotenv.config();
 
 const app = express();
 const PORT = 3000;
-const LOCAL_STT_DIR = path.join(os.tmpdir(), "meetbrain-local-stt");
 
 // Set maximum request size to support larger audio file uploads
 app.use(express.json({ limit: "100mb" }));
@@ -89,39 +86,6 @@ function setSessionCookie(res: express.Response, token: string) {
 
 function clearSessionCookie(res: express.Response) {
   res.clearCookie(SESSION_COOKIE, { path: "/" });
-}
-
-function parseCommandArgs(raw: string) {
-  const matches = raw.match(/(?:[^\s"]+|"[^"]*")+/g) || [];
-  return matches.map((item) => item.replace(/^"|"$/g, ""));
-}
-
-function getLocalSttConfig() {
-  const command = process.env.LOCAL_STT_COMMAND?.trim();
-  const argsTemplate = process.env.LOCAL_STT_ARGS?.trim() || "{input}";
-  return {
-    command,
-    argsTemplate,
-    configured: !!command,
-  };
-}
-
-function runLocalTranscriber(inputPath: string): Promise<string> {
-  const config = getLocalSttConfig();
-  if (!config.command) {
-    throw new Error("Motor local de transcripcion no configurado. Define LOCAL_STT_COMMAND y LOCAL_STT_ARGS en .env.");
-  }
-
-  const args = parseCommandArgs(config.argsTemplate).map((arg) => arg.replace(/\{input\}/g, inputPath));
-  return new Promise((resolve, reject) => {
-    execFile(config.command, args, { timeout: 120000, windowsHide: true, maxBuffer: 1024 * 1024 * 4 }, (error, stdout, stderr) => {
-      if (error) {
-        reject(new Error(stderr?.trim() || error.message || "Fallo el motor local de transcripcion."));
-        return;
-      }
-      resolve(stdout.trim());
-    });
-  });
 }
 
 async function requireLocalUser(req: express.Request, res: express.Response, next: express.NextFunction) {
@@ -283,136 +247,6 @@ app.delete("/api/account", requireLocalUser, async (req, res): Promise<any> => {
   await deleteAccount(user.uid);
   clearSessionCookie(res);
   return res.json({ ok: true });
-});
-
-app.get("/api/local-transcribe/status", requireLocalUser, async (req, res): Promise<any> => {
-  const config = getLocalSttConfig();
-  return res.json({
-    configured: config.configured,
-    command: config.configured ? path.basename(config.command || "") : "",
-  });
-});
-
-app.post("/api/local-transcribe-live", requireLocalUser, async (req, res): Promise<any> => {
-  let inputPath = "";
-  try {
-    const { audio, mimeType } = req.body;
-    if (!audio) {
-      return res.status(400).json({ error: "Falta audio para transcribir localmente." });
-    }
-
-    let cleanBase64 = String(audio);
-    if (cleanBase64.includes(";base64,")) {
-      cleanBase64 = cleanBase64.split(";base64,")[1];
-    }
-
-    const ext = String(mimeType || "").includes("wav") ? "wav" : "webm";
-    fs.mkdirSync(LOCAL_STT_DIR, { recursive: true });
-    inputPath = path.join(LOCAL_STT_DIR, `segment-${Date.now()}-${Math.random().toString(16).slice(2)}.${ext}`);
-    fs.writeFileSync(inputPath, Buffer.from(cleanBase64, "base64"));
-
-    const transcript = (await runLocalTranscriber(inputPath))
-      .replace(/\[[^\]]+\]/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    return res.json({
-      transcript,
-      hasSpeech: transcript.length > 0,
-    });
-  } catch (error: any) {
-    return res.status(500).json({
-      error: error.message || "No se pudo transcribir con el motor local.",
-    });
-  } finally {
-    if (inputPath) {
-      fs.promises.unlink(inputPath).catch(() => {});
-    }
-  }
-});
-
-// Short live transcription endpoint. It must not summarize or invent context.
-app.post("/api/transcribe-live", requireLocalUser, async (req, res): Promise<any> => {
-  try {
-    const { audio, mimeType } = req.body;
-
-    if (!audio) {
-      return res.status(400).json({ error: "Missing audio data in base64 format." });
-    }
-
-    const resolvedApiKey = await resolveUserGeminiApiKey(req);
-
-    let cleanBase64 = audio;
-    if (audio.includes(";base64,")) {
-      cleanBase64 = audio.split(";base64,")[1];
-    }
-
-    const ai = new GoogleGenAI({
-      apiKey: resolvedApiKey,
-      httpOptions: {
-        headers: {
-          "User-Agent": "meetbrain-local",
-        },
-      },
-    });
-
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: mimeType || "audio/wav",
-              data: cleanBase64,
-            },
-          },
-          {
-            text:
-              "Transcribe exactamente el habla audible de este audio. " +
-              "Si no hay voz clara o no puedes entenderla, devuelve transcript vacio y hasSpeech false. " +
-              "No inventes nombres, temas, contexto, profesores, clases, videos ni frases. " +
-              "No resumas, no traduzcas, no agregues timestamps. " +
-              "Si el idioma es ambiguo entre espanol y portugues, prioriza espanol latinoamericano y no uses vocabulario portugues salvo que sea claramente audible.",
-          },
-        ],
-      },
-      config: {
-        systemInstruction:
-          "You are a strict speech-to-text engine. Return only what is clearly audible. Never infer missing content.",
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            transcript: {
-              type: Type.STRING,
-              description: "Exact audible transcript only. Empty string when speech is unclear or absent.",
-            },
-            hasSpeech: {
-              type: Type.BOOLEAN,
-              description: "True only when the audio contains clear intelligible speech.",
-            },
-          },
-          required: ["transcript", "hasSpeech"],
-        },
-      },
-    });
-
-    if (!response.text) {
-      return res.json({ transcript: "", hasSpeech: false });
-    }
-
-    const result = JSON.parse(response.text);
-    const transcript = typeof result.transcript === "string" ? result.transcript.trim() : "";
-    return res.json({
-      transcript,
-      hasSpeech: !!result.hasSpeech && transcript.length > 0,
-    });
-  } catch (error: any) {
-    console.error("Live Transcribe API Error:", error);
-    return res.status(500).json({
-      error: toFriendlyGeminiError(error) || "No se pudo transcribir el segmento en vivo.",
-    });
-  }
 });
 
 // Transcribe and analyze audio
