@@ -43,7 +43,6 @@ interface MeetingViewerProps {
   folders: MeetingFolder[];
   selectedMeeting: Meeting | null;
   onSelectMeeting: (meeting: Meeting) => void;
-  onClearSelection: () => void;
   onDeleteMeeting: (id: string) => void;
   onToggleFavorite: (id: string) => void;
   onUpdateMeetingTitle: (id: string, newTitle: string) => void;
@@ -63,7 +62,6 @@ export default function MeetingViewer({
   folders,
   selectedMeeting,
   onSelectMeeting,
-  onClearSelection,
   onDeleteMeeting,
   onToggleFavorite,
   onUpdateMeetingTitle,
@@ -71,7 +69,6 @@ export default function MeetingViewer({
   onCreateFolder,
   onDeleteFolder,
 }: MeetingViewerProps) {
-  const [selectedDateFilter, setSelectedDateFilter] = useState("");
   const [selectedFolderFilter, setSelectedFolderFilter] = useState("all");
   const [newFolderName, setNewFolderName] = useState("");
   const [isCreatingFolder, setIsCreatingFolder] = useState(false);
@@ -199,34 +196,18 @@ Puedes pedirme decisiones, tareas, resumen ejecutivo o preguntas sobre la transc
 
   // Search and filter meetings
   const filteredMeetings = meetings.filter((meeting) => {
-    const meetingDate = new Date(meeting.date);
-    const meetingDay = `${meetingDate.getFullYear()}-${String(meetingDate.getMonth() + 1).padStart(2, "0")}-${String(meetingDate.getDate()).padStart(2, "0")}`;
-    const matchesDate = !selectedDateFilter || meetingDay === selectedDateFilter;
-    const matchesFolder =
+    return (
       selectedFolderFilter === "all" ||
-      (selectedFolderFilter === "none" ? !meeting.folderId : meeting.folderId === selectedFolderFilter);
-    
-    return matchesDate && matchesFolder;
+      (selectedFolderFilter === "none" ? !meeting.folderId : meeting.folderId === selectedFolderFilter)
+    );
   });
 
-  const meetingsOnSelectedDate = selectedDateFilter
-    ? meetings.filter((meeting) => {
-        const meetingDate = new Date(meeting.date);
-        const meetingDay = `${meetingDate.getFullYear()}-${String(meetingDate.getMonth() + 1).padStart(2, "0")}-${String(meetingDate.getDate()).padStart(2, "0")}`;
-        return meetingDay === selectedDateFilter;
-      })
-    : [];
-
   useEffect(() => {
-    if (!selectedDateFilter && selectedFolderFilter === "all") return;
-    if (filteredMeetings.length === 0) {
-      if (selectedMeeting) onClearSelection();
-      return;
-    }
+    if (filteredMeetings.length === 0) return;
     if (!selectedMeeting || !filteredMeetings.some((meeting) => meeting.id === selectedMeeting.id)) {
       onSelectMeeting(filteredMeetings[0]);
     }
-  }, [selectedDateFilter, selectedFolderFilter, filteredMeetings, selectedMeeting, onSelectMeeting, onClearSelection]);
+  }, [selectedFolderFilter, filteredMeetings, selectedMeeting, onSelectMeeting]);
 
   const handleCreateFolder = async () => {
     const cleanName = newFolderName.trim();
@@ -251,19 +232,22 @@ Puedes pedirme decisiones, tareas, resumen ejecutivo o preguntas sobre la transc
     ? folders.find((folder) => folder.id === selectedMeeting.folderId)?.name
     : "";
 
-  const canAssignDateToFolder =
-    selectedDateFilter &&
-    selectedFolderFilter !== "all" &&
-    selectedFolderFilter !== "none" &&
-    meetingsOnSelectedDate.length > 0;
+  const activeMeeting = selectedMeeting && filteredMeetings.some((meeting) => meeting.id === selectedMeeting.id)
+    ? selectedMeeting
+    : null;
 
-  const handleAssignSelectedDateToFolder = () => {
-    if (!canAssignDateToFolder) return;
-    meetingsOnSelectedDate.forEach((meeting) => {
-      if (meeting.folderId !== selectedFolderFilter) {
-        onUpdateMeeting(meeting.id, { folderId: selectedFolderFilter });
-      }
-    });
+  const handleDeleteSelectedFolder = async () => {
+    if (selectedFolderFilter === "all" || selectedFolderFilter === "none") return;
+    const folder = folders.find((item) => item.id === selectedFolderFilter);
+    const ok = window.confirm(`Eliminar la carpeta "${folder?.name || "seleccionada"}"? Las reuniones se conservaran en Sin carpeta.`);
+    if (!ok) return;
+    setFolderError("");
+    try {
+      await onDeleteFolder(selectedFolderFilter);
+      setSelectedFolderFilter("all");
+    } catch (error: any) {
+      setFolderError(error.message || "No se pudo eliminar la carpeta.");
+    }
   };
 
   const startEditTitle = (meeting: Meeting) => {
@@ -680,99 +664,77 @@ ${meeting.transcript}
     <div className="flex h-[calc(100vh-96px)] gap-3 select-none font-sans relative overflow-hidden">
       
       {/* 2. Interactive Double Pane (Main Workspace & Ask Olli AI Column) */}
-      <div id="notes_workspace" className="flex-grow min-w-0 bg-white border border-[#E9E9EB] rounded-2xl flex flex-row overflow-hidden shadow-sm">
-        {selectedMeeting ? (
-          <div className="flex w-full h-full">
+      <div id="notes_workspace" className="flex-grow min-w-0 bg-white border border-[#E9E9EB] rounded-2xl flex flex-col overflow-hidden shadow-sm">
+        <div className="px-6 py-2 border-b border-[#E9E9EB] bg-white flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2 min-w-0">
+            <select
+              value={selectedFolderFilter}
+              onChange={(e) => setSelectedFolderFilter(e.target.value)}
+              className="h-8 min-w-[150px] rounded-lg border border-[#E9E9EB] bg-white px-3 text-xs font-semibold text-slate-650 outline-none transition-all hover:border-[#135bf1]/30 focus:border-[#135bf1]"
+              title="Filtrar por carpeta"
+            >
+              <option value="all">Todas las carpetas</option>
+              <option value="none">Sin carpeta</option>
+              {folders.map((folder) => (
+                <option key={folder.id} value={folder.id}>{folder.name}</option>
+              ))}
+            </select>
+
+            <div className="flex items-center gap-1.5">
+              <input
+                type="text"
+                value={newFolderName}
+                onChange={(e) => setNewFolderName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") handleCreateFolder();
+                }}
+                placeholder="Nueva carpeta"
+                className="h-8 w-36 rounded-lg border border-[#E9E9EB] bg-white px-3 text-xs font-semibold text-slate-650 placeholder:text-slate-400 outline-none transition-all hover:border-[#135bf1]/30 focus:border-[#135bf1]"
+              />
+              <button
+                type="button"
+                onClick={handleCreateFolder}
+                disabled={isCreatingFolder || !newFolderName.trim()}
+                className="h-8 w-8 inline-flex items-center justify-center rounded-lg bg-[#135bf1] text-white hover:bg-[#0746cc] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Crear carpeta"
+              >
+                <Plus className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {folderError && (
+              <span className="text-[10px] font-semibold text-rose-600">{folderError}</span>
+            )}
+
+            {selectedFolderFilter !== "all" && selectedFolderFilter !== "none" && (
+              <button
+                type="button"
+                onClick={handleDeleteSelectedFolder}
+                className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-[#E9E9EB] bg-white text-slate-400 hover:border-rose-100 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+                title="Eliminar carpeta"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          {selectedFolderFilter !== "all" && (
+            <button
+              type="button"
+              onClick={() => setSelectedFolderFilter("all")}
+              className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-[#E9E9EB] bg-white text-slate-500 hover:text-[#135bf1] transition-colors"
+              title="Limpiar filtro"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {selectedMeeting && activeMeeting ? (
+          <div className="flex w-full flex-grow min-h-0">
             
             {/* Left Pane - Document text and media */}
             <div className="flex-grow flex flex-col h-full min-w-0 border-r border-[#E9E9EB] relative">
-              <div className="px-6 py-2 border-b border-[#E9E9EB] bg-white flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap items-center gap-2 min-w-0">
-                  <select
-                    value={selectedFolderFilter}
-                    onChange={(e) => setSelectedFolderFilter(e.target.value)}
-                    className="h-8 min-w-[150px] rounded-lg border border-[#E9E9EB] bg-white px-3 text-xs font-semibold text-slate-650 outline-none transition-all hover:border-[#135bf1]/30 focus:border-[#135bf1]"
-                    title="Filtrar por carpeta"
-                  >
-                    <option value="all">Todas las carpetas</option>
-                    <option value="none">Sin carpeta</option>
-                    {folders.map((folder) => (
-                      <option key={folder.id} value={folder.id}>{folder.name}</option>
-                    ))}
-                  </select>
-
-                  <div className="flex items-center gap-1.5">
-                    <input
-                      type="text"
-                      value={newFolderName}
-                      onChange={(e) => setNewFolderName(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleCreateFolder();
-                      }}
-                      placeholder="Nueva carpeta"
-                      className="h-8 w-36 rounded-lg border border-[#E9E9EB] bg-white px-3 text-xs font-semibold text-slate-650 placeholder:text-slate-400 outline-none transition-all hover:border-[#135bf1]/30 focus:border-[#135bf1]"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleCreateFolder}
-                      disabled={isCreatingFolder || !newFolderName.trim()}
-                      className="h-8 w-8 inline-flex items-center justify-center rounded-lg bg-[#135bf1] text-white hover:bg-[#0746cc] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      title="Crear carpeta"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-
-                  {folderError && (
-                    <span className="text-[10px] font-semibold text-rose-600">{folderError}</span>
-                  )}
-
-                  {selectedFolderFilter !== "all" && selectedFolderFilter !== "none" && (
-                    <button
-                      type="button"
-                      onClick={() => onDeleteFolder(selectedFolderFilter)}
-                      className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-[#E9E9EB] bg-white text-slate-400 hover:border-rose-100 hover:bg-rose-50 hover:text-rose-600 transition-colors"
-                      title="Eliminar carpeta"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <input
-                    id="meeting-date-filter"
-                    type="date"
-                    value={selectedDateFilter}
-                    onChange={(e) => setSelectedDateFilter(e.target.value)}
-                    className="h-8 rounded-lg border border-[#E9E9EB] bg-white px-3 text-xs font-semibold text-slate-600 outline-none transition-all hover:border-[#135bf1]/30 focus:border-[#135bf1]"
-                  />
-                  {canAssignDateToFolder && (
-                    <button
-                      type="button"
-                      onClick={handleAssignSelectedDateToFolder}
-                      className="h-8 rounded-lg bg-[#135bf1] px-3 text-[11px] font-bold text-white hover:bg-[#0746cc] transition-colors"
-                      title="Asignar todas las reuniones de la fecha a esta carpeta"
-                    >
-                      Asignar fecha
-                    </button>
-                  )}
-                  {(selectedDateFilter || selectedFolderFilter !== "all") && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setSelectedDateFilter("");
-                        setSelectedFolderFilter("all");
-                      }}
-                      className="h-8 w-8 inline-flex items-center justify-center rounded-lg border border-[#E9E9EB] bg-white text-slate-500 hover:text-[#135bf1] transition-colors"
-                      title="Limpiar filtros"
-                    >
-                      <X className="w-3.5 h-3.5" />
-                    </button>
-                  )}
-                </div>
-              </div>
-              
               {/* Doc Workspace header controls */}
               <div className="p-6 border-b border-[#E9E9EB] bg-white flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div className="flex-grow min-w-0">
@@ -1227,15 +1189,19 @@ ${meeting.transcript}
 
           </div>
         ) : (
-          <div className="flex-grow flex flex-col items-center justify-center p-8 text-center bg-slate-50/5 select-none">
-            <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center text-slate-400 mb-4 shadow-sm">
-              <FolderOpen className="w-7 h-7 text-slate-400" />
+          <div className="flex-grow min-h-0 flex flex-col items-center justify-center p-8 text-center bg-slate-50/40 select-none">
+            <div className="w-14 h-14 bg-white rounded-2xl border border-[#E9E9EB] flex items-center justify-center text-slate-400 mb-4 shadow-sm">
+              <FolderOpen className="w-6 h-6 text-slate-400" />
             </div>
-            <h3 className="text-xs font-black text-slate-700 mt-1 uppercase tracking-wider">
-              No Conversation Active
+            <h3 className="text-sm font-black text-slate-800 mt-1">
+              {selectedFolderFilter === "all" ? "No hay reuniones guardadas" : "No hay reuniones en esta carpeta"}
             </h3>
-            <p className="text-[10px] text-slate-400 max-w-xs mt-1.5 leading-relaxed">
-              Selecciona una sesión de audio o acta de la boveda a la izquierda, o inicia una nueva grabación dentro de Abrir asistente.
+            <p className="text-xs text-slate-500 max-w-sm mt-2 leading-relaxed">
+              {selectedFolderFilter === "none"
+                ? "Todas las reuniones disponibles ya tienen una carpeta asignada."
+                : selectedFolderFilter === "all"
+                  ? "Graba una clase o sube audio para crear tu primera reunion local."
+                  : "Crea o asigna reuniones a esta carpeta desde el selector de carpeta de cada reunion."}
             </p>
           </div>
         )}
@@ -1420,3 +1386,4 @@ ${meeting.transcript}
     </div>
   );
 }
+
