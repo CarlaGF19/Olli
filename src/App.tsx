@@ -601,12 +601,8 @@ export default function App() {
               {activeTab === "dashboard" && (
                 <Dashboard
                   meetings={meetings}
-                  onSelectMeeting={(m) => {
-                    setSelectedMeeting(m);
-                    setActiveTab("meetings");
-                  }}
+                  settings={settings}
                   setActiveTab={setActiveTab}
-                  onToggleFavorite={handleToggleFavorite}
                   setRecorderMode={setPreselectedRecorderMode}
                 />
               )}
