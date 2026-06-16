@@ -1241,7 +1241,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
       yPosition += 5.4;
     }
 
-    doc.save(`MeetingBrain_Borrador_Sincronizado_${Date.now()}.pdf`);
+    doc.save(`Olli_Borrador_Sincronizado_${Date.now()}.pdf`);
   };
 
   const formatTimer = (totalSeconds: number) => {

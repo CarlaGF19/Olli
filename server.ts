@@ -135,7 +135,7 @@ function getGeminiClient(): GoogleGenAI {
 
 // REST API Routes
 app.get("/api/health", (req, res) => {
-  res.json({ status: "ok", message: "MeetingBrain backend is fully operational" });
+  res.json({ status: "ok", message: "Olli backend is fully operational" });
 });
 
 // Local authentication and SQLite data routes
@@ -337,7 +337,7 @@ app.post("/api/transcribe", requireLocalUser, async (req, res): Promise<any> => 
       cleanBase64 = audio.split(";base64,")[1];
     }
 
-    const systemPrompt = `You are MeetingBrain, an elite AI tool designed to transcribe recordings and output gorgeous Notion & Obsidian styled meeting summaries.
+    const systemPrompt = `You are Olli, an elite AI tool designed to transcribe recordings and output gorgeous Notion & Obsidian styled meeting summaries.
 Analyze the audio file provided and generate the response in the language spoken in the audio.
 CRITICAL: If the language of the audio is Spanish, the 'title', 'transcript', and 'summary' MUST be generated entirely in Spanish. Do NOT translate Spanish speech or summaries into English. Default to Spanish when in doubt.
 
@@ -424,7 +424,7 @@ app.post("/api/summarize-text", requireLocalUser, async (req, res): Promise<any>
       },
     });
 
-    const systemPrompt = `You are MeetingBrain, an elite AI tool designed to summarize meeting transcriptions and output gorgeous Notion & Obsidian styled summaries.
+    const systemPrompt = `You are Olli, an elite AI tool designed to summarize meeting transcriptions and output gorgeous Notion & Obsidian styled summaries.
 Analyze the transcript provided and generate the response in the same language.
 CRITICAL: If the input text is in Spanish, the 'title' and 'summary' MUST be generated entirely in Spanish. Default to Spanish when in doubt.
 
@@ -551,44 +551,27 @@ app.post("/api/send-email", async (req, res): Promise<any> => {
       return res.status(400).json({ error: "Falta el destinatario (correo electrónico)" });
     }
 
-    // Determine if custom SMTP is configured
     const useSmtp = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
-    
-    let transporter;
-    let senderAddress = process.env.SMTP_FROM || "no-reply@meetingbrain.local";
-    let isTestAccount = false;
-    let testMessageBoxUrl = "";
 
-    if (useSmtp) {
-      // Use custom SMTP configured
-      transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: parseInt(process.env.SMTP_PORT || "587"),
-        secure: process.env.SMTP_PORT === "465",
-        auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS,
-        },
+    if (!useSmtp) {
+      return res.status(503).json({
+        code: "SMTP_NOT_CONFIGURED",
+        error: "Olli no tiene SMTP configurado. Se descargara el PDF y se abrira un borrador de correo para adjuntarlo manualmente.",
       });
-    } else {
-      // Fallback: Dynamically generate a temporary Ethereal test SMTP account (brilliant for preview/sandbox checks)
-      console.log("No SMTP settings in .env/secrets. Creating automatic temporary Ethereal SMTP account for live preview/logs...");
-      isTestAccount = true;
-      const testAccount = await nodemailer.createTestAccount();
-      
-      transporter = nodemailer.createTransport({
-        host: testAccount.smtp.host,
-        port: testAccount.smtp.port,
-        secure: testAccount.smtp.secure,
-        auth: {
-          user: testAccount.user,
-          pass: testAccount.pass,
-        },
-      });
-      senderAddress = `"MeetingBrain Local Preview" <${testAccount.user}>`;
     }
 
-    const meetingTitle = title || "Reunión de MeetingBrain";
+    const senderAddress = process.env.SMTP_FROM || "no-reply@olli.local";
+    const transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || "587"),
+      secure: process.env.SMTP_PORT === "465",
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
+
+    const meetingTitle = title || "Reunion de Olli";
     const mailOptions: {
       from: string;
       to: string;
@@ -603,9 +586,8 @@ app.post("/api/send-email", async (req, res): Promise<any> => {
       html: `
         <div style="font-family: system-ui, -apple-system, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #f1f5f9; border-radius: 16px; background-color: #ffffff; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05);">
           <div style="text-align: center; border-bottom: 1px solid #f1f5f9; padding-bottom: 20px; margin-bottom: 24px;">
-            <span style="font-size: 28px;">🧠</span>
-            <h1 style="color: #0f172a; margin: 8px 0 0 0; font-size: 22px; font-weight: 800; letter-spacing: -0.025em;">MeetingBrain</h1>
-            <p style="color: #64748b; margin: 4px 0 0 0; font-size: 14px;">Actas de Reunión & Transcripción de Audio Inteligente</p>
+            <h1 style="color: #0f172a; margin: 8px 0 0 0; font-size: 22px; font-weight: 800; letter-spacing: -0.025em;">Olli</h1>
+            <p style="color: #64748b; margin: 4px 0 0 0; font-size: 14px;">Actas de reunion y transcripcion inteligente</p>
           </div>
           
           <p style="font-size: 15px; color: #334155; line-height: 1.6; margin-top: 0;">¡Hola!</p>
@@ -616,22 +598,22 @@ app.post("/api/send-email", async (req, res): Promise<any> => {
           <div style="background-color: #f8fafc; padding: 18px; border-radius: 12px; border: 1px solid #f1f5f9; margin: 24px 0;">
             <p style="margin: 0 0 8px 0; font-size: 11px; text-transform: uppercase; font-weight: 800; color: #64748b; letter-spacing: 0.05em;">Notas u observaciones de quien envía:</p>
             <p style="margin: 0; font-size: 14px; color: #0f172a; font-style: italic; line-height: 1.5;">
-              "${body ? body.replace(/\ng/, '<br/>') : 'No se incluyeron notas adicionales.'}"
+              "${body ? body.replace(/\n/g, '<br/>') : 'No se incluyeron notas adicionales.'}"
             </p>
           </div>
           
           <div style="border-top: 1px solid #f1f5f9; padding-top: 20px; margin-top: 24px; text-align: center;">
             <p style="font-size: 13px; color: #64748b; margin: 0 0 4px 0;">¿Deseas procesar más reuniones de hasta 3 horas sin límites de tamaño?</p>
-            <p style="font-size: 13px; color: #0f172a; font-weight: 600; margin: 0;">Ejecuta MeetingBrain localmente o en tu propio servidor VPS/Cloud Run.</p>
+            <p style="font-size: 13px; color: #0f172a; font-weight: 600; margin: 0;">Ejecuta Olli localmente o en tu propio servidor.</p>
           </div>
           
           <footer style="margin-top: 40px; border-top: 1px solid #e2e8f0; padding-top: 16px; text-align: center; font-size: 11px; color: #94a3b8; line-height: 1.5;">
-            Enviado de forma segura de forma automática a través de MeetingBrain.<br/>
+            Enviado desde Olli local.<br/>
             Para usar un servidor de correo corporativo real, configura tus variables SMTP en la configuración de entorno o de AI Studio secrets.
           </footer>
         </div>
       `,
-      text: `MeetingBrain Report: ${meetingTitle}\n\nAquí tienes el resumen y transcripción de la reunión adjunta en PDF.\n\nObservaciones enviadas:\n"${body || 'N/A'}"\n\nEnviado de forma segura desde tu portal de minutos MeetingBrain.`,
+      text: `Olli Report: ${meetingTitle}\n\nAqui tienes el resumen y transcripcion de la reunion adjunta en PDF.\n\nObservaciones enviadas:\n"${body || 'N/A'}"\n\nEnviado desde Olli local.`,
       attachments: [],
     };
 
@@ -653,19 +635,10 @@ app.post("/api/send-email", async (req, res): Promise<any> => {
     const info = await transporter.sendMail(mailOptions);
     console.log("Email sent successfully. Message ID:", info.messageId);
 
-    if (isTestAccount) {
-      testMessageBoxUrl = nodemailer.getTestMessageUrl(info) || "";
-      console.log("Test inbox viewing link available at:", testMessageBoxUrl);
-    }
-
     return res.json({
       success: true,
       messageId: info.messageId,
-      isTestAccount,
-      testMessageBoxUrl,
-      message: isTestAccount 
-        ? "El correo se envió con éxito usando un servidor de pruebas temporal (Ethereal). Puedes acceder a la bandeja para ver el PDF adjunto y la bandeja de entrada aquí."
-        : "El correo electrónico fue despachado exitosamente con el PDF adjunto a través de tu servidor SMTP configurado."
+      message: "El correo fue enviado con el PDF adjunto usando tu SMTP configurado."
     });
 
   } catch (error: any) {
@@ -681,7 +654,7 @@ app.post("/api/send-email", async (req, res): Promise<any> => {
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   console.error("Global Handled Express Error:", err);
   res.status(err.status || 500).json({
-    error: err.message || "An unexpected server-side error occurred in the MeetingBrain backend.",
+    error: err.message || "An unexpected server-side error occurred in the Olli backend.",
   });
 });
 
@@ -714,7 +687,7 @@ async function configureServer() {
   }
 
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`MeetingBrain Server fully operational at http://localhost:${PORT}`);
+    console.log(`Olli Server fully operational at http://localhost:${PORT}`);
   });
 }
 

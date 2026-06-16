@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-const DB_NAME = "MeetingBrainStore";
+const DB_NAME = "OlliStore";
 const DB_VERSION = 1;
 const STORE_NAME = "meetings";
 

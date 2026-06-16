@@ -38,7 +38,7 @@ const INITIAL_DEMO_MEETINGS: Meeting[] = [
     duration: "05:14",
     isFavorite: true,
     audioSizeKb: 1450,
-    transcript: `Alexis: Good morning everyone, let's go ahead and start our weekly alignment standup. We have some major milestones upcoming for the MeetingBrain sprint.
+    transcript: `Alexis: Good morning everyone, let's go ahead and start our weekly alignment standup. We have some major milestones upcoming for the Olli sprint.
 Marcus: Sounds good. On my end, I've finished the draft designs for the visual recording widget. Inspired by Otter.ai, it has a flowing waves visualizer on a canvas and responsive timing tags.
 Sarah: Excellent. I'm finalizing the Gemini AI proxy server routes in Express. It securely transcribes raw audio streams using the gemini-3.5-flash model, packaging outlines immediately in JSON schemas.
 Alexis: Majestic work Sarah. Make sure to implement automatic deletion parameters to purge heavy base64 data once transcription vaults are active, to optimize local cache sizes.
@@ -48,7 +48,7 @@ Alexis: Perfect. Thanks everyone, keep up the amazing velocity!`,
 **Date**: June 11, 2026 | **Duration**: 05:14 | **Host**: Alexis Jordan
 
 ### Meeting Overview
-Alignment sync validating current visual interfaces and the AI engine deployment for the MeetingBrain MVP prototype.
+Alignment sync validating current visual interfaces and the AI engine deployment for the Olli MVP prototype.
 
 ### Core Discussions
 - **Visual Recording Waveform**: Marcus previewed the canvas layout inspired by Otter.ai featuring active glowing oscillations.
@@ -59,7 +59,7 @@ Alignment sync validating current visual interfaces and the AI engine deployment
 - [x] Design beautiful waveform canvas visualizers - **Marcus**
 - [x] Configure lazy Google GenAI Express routes - **Sarah**
 - [ ] Implement auto-delete base64 memory caches - **Sarah / Marcus**
-- [ ] Compile production-ready beta binaries of MeetingBrain - **Team**`,
+- [ ] Compile production-ready beta binaries of Olli - **Team**`,
   },
   {
     id: "demo-meeting-2",
@@ -106,7 +106,7 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings>({
     aiProvider: "gemini",
     apiKey: "",
-    audioFolder: "/MeetingBrain/Vault/",
+    audioFolder: "/Olli/Vault/",
     autoDeleteAudio: true,
     bypassSizeLimit: false,
   });
@@ -508,7 +508,7 @@ export default function App() {
               <Brain className="w-4 h-4" />
             </div>
             <span className="font-bold text-slate-800 text-sm tracking-tight">
-              MeetingBrain
+              Olli
             </span>
           </div>
 

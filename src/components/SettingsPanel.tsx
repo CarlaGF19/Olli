@@ -172,7 +172,7 @@ export default function SettingsPanel({
                     type="text"
                     value={audioFolder}
                     onChange={(e) => setAudioFolder(e.target.value)}
-                    placeholder="/MeetingBrain/Notes/"
+                    placeholder="/Olli/Notes/"
                     className="w-full pl-11 pr-4 py-2.5 bg-slate-50 border border-slate-200 focus:bg-white text-xs rounded-xl outline-none focus:border-[#135bf1] transition-all text-slate-800"
                     required
                   />

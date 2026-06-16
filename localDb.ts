@@ -236,7 +236,7 @@ function defaultSettings(): LocalSettings {
   return {
     aiProvider: "gemini",
     apiKey: "",
-    audioFolder: "/MeetingBrain/Vault/",
+    audioFolder: "/Olli/Vault/",
     autoDeleteAudio: true,
     bypassSizeLimit: false,
   };
@@ -525,7 +525,7 @@ export async function getSettings(userId: string, includeSecret = false): Promis
     aiProvider: row.ai_provider || "gemini",
     apiKey: includeSecret ? row.api_key || "" : "",
     hasApiKey: !!row.api_key,
-    audioFolder: row.audio_folder || "/MeetingBrain/Vault/",
+    audioFolder: row.audio_folder || "/Olli/Vault/",
     autoDeleteAudio: !!row.auto_delete_audio,
     bypassSizeLimit: !!row.bypass_size_limit,
   };
@@ -543,7 +543,7 @@ export async function saveSettings(userId: string, settings: LocalSettings) {
       userId,
       settings.aiProvider || "gemini",
       settings.apiKey !== undefined ? settings.apiKey || "" : existing?.api_key || "",
-      settings.audioFolder || "/MeetingBrain/Vault/",
+      settings.audioFolder || "/Olli/Vault/",
       settings.autoDeleteAudio ? 1 : 0,
       settings.bypassSizeLimit ? 1 : 0,
       existing?.created_at || timestamp,

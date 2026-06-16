@@ -126,7 +126,7 @@ export default function LoginRegister({ onLoginSuccess }: LoginRegisterProps) {
               <span className="w-1 h-4.5 rounded-full bg-teal-400" />
             </div>
             <span className="font-display font-black text-2xl tracking-tighter text-white">
-              MeetBrain<span className="text-cyan-300 ml-[1px]">.</span>
+              Olli<span className="text-cyan-300 ml-[1px]">.</span>
             </span>
           </div>
 

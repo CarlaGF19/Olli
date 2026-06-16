@@ -1,4 +1,4 @@
-# Hardened Security Specification for MeetingBrain
+# Hardened Security Specification for Olli
 
 ## 1. Data Invariants
 1. **Meeting Ownership**: No meeting document can be created or updated without a verified `ownerId` that matches the authenticated user (`request.auth.uid`).

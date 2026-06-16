@@ -90,7 +90,6 @@ export default function MeetingViewer({
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [emailError, setEmailError] = useState("");
   const [emailSuccess, setEmailSuccess] = useState<string | null>(null);
-  const [testMessageBoxUrl, setTestMessageBoxUrl] = useState<string | null>(null);
 
 
 
@@ -434,27 +433,32 @@ ${meeting.transcript}
   const handleSendEmail = async () => {
     if (!selectedMeeting) return;
     if (!recipientEmail || !recipientEmail.trim()) {
-      setEmailError("Por favor ingresa un correo electrónico de destino válido.");
+      setEmailError("Por favor ingresa un correo electronico de destino valido.");
       return;
     }
 
     setIsSendingEmail(true);
     setEmailError("");
     setEmailSuccess(null);
-    setTestMessageBoxUrl(null);
 
     try {
       const doc = generatePDFDoc(selectedMeeting);
       const pdfBase64DataUri = doc.output("datauristring");
       const cleanName = selectedMeeting.title.toLowerCase().replace(/[^a-z0-9]+/g, "-");
       const pdfFilename = `${cleanName}-resumen.pdf`;
+      const subject = emailSubject || `Acta de reunion: ${selectedMeeting.title}`;
+      const localMailBody = [
+        emailNote || "Hola, te comparto el acta de la reunion junto con la transcripcion completa.",
+        "",
+        `Olli descargo el PDF "${pdfFilename}". Adjuntalo manualmente antes de enviar este correo.`,
+      ].join("\n");
 
       const response = await fetch("/api/send-email", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           to: recipientEmail,
-          subject: emailSubject || `Acta de reunion: ${selectedMeeting.title}`,
+          subject,
           body: emailNote,
           pdfBase64: pdfBase64DataUri,
           pdfFilename,
@@ -464,21 +468,25 @@ ${meeting.transcript}
 
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.error || "No se pudo despachar el correo electrónico.");
+        if (errData.code === "SMTP_NOT_CONFIGURED") {
+          doc.save(pdfFilename);
+          window.location.href = `mailto:${encodeURIComponent(recipientEmail.trim())}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(localMailBody)}`;
+          setEmailSuccess("No hay SMTP configurado. Olli descargo el PDF y abrio un borrador de correo para que lo adjuntes manualmente.");
+          setRecipientEmail("");
+          setEmailNote("");
+          return;
+        }
+        throw new Error(errData.error || "No se pudo enviar el correo electronico.");
       }
 
       const result = await response.json();
-      
+
       if (result.success) {
         setEmailSuccess(result.message);
-        if (result.isTestAccount && result.testMessageBoxUrl) {
-          setTestMessageBoxUrl(result.testMessageBoxUrl);
-        }
-        // Limpiar campos importantes
         setRecipientEmail("");
         setEmailNote("");
       } else {
-        throw new Error(result.error || "Ocurrió un error inesperado al despachar.");
+        throw new Error(result.error || "Ocurrio un error inesperado al enviar.");
       }
 
     } catch (err: any) {
@@ -847,7 +855,6 @@ ${meeting.transcript}
                       setEmailSubject(`Acta de reunion: ${selectedMeeting.title}`);
                       setEmailSuccess(null);
                       setEmailError("");
-                      setTestMessageBoxUrl(null);
                     }}
                     className="px-3.5 py-1.5 rounded-full bg-[#135bf1] hover:bg-[#0746cc] text-white flex items-center gap-1.5 text-xs font-bold shadow-xs cursor-pointer transition-all active:scale-95"
                     title="Compartir meeting note via E-mail"
@@ -1239,7 +1246,7 @@ ${meeting.transcript}
                   </div>
                   <div>
                     <h3 className="text-sm font-bold text-slate-800 leading-none">Enviar Reporte PDF</h3>
-                    <p className="text-[10px] text-slate-400 mt-1">Comparte actas y transcripción por correo</p>
+                    <p className="text-[10px] text-slate-400 mt-1">Comparte actas con SMTP o correo local</p>
                   </div>
                 </div>
                 <button
@@ -1258,9 +1265,9 @@ ${meeting.transcript}
                 <div className="p-3.5 bg-indigo-50/40 border border-indigo-100/30 rounded-2xl flex items-start space-x-2.5 text-[11px] text-indigo-800 leading-relaxed">
                   <span className="text-sm shrink-0">📎</span>
                   <div>
-                    <span className="font-semibold text-indigo-900">Adjunto automático listo:</span>
+                    <span className="font-semibold text-indigo-900">PDF listo para compartir:</span>
                     <p className="mt-0.5 text-indigo-750/90 text-[10px]">
-                      El PDF con el resumen ejecutivo estructurado, notas y transcripción se generará en este instante y se adjuntará directamente al correo.
+                      Si SMTP esta configurado, Olli enviara el adjunto. Si no, descargara el PDF y abrira tu correo para adjuntarlo manualmente.
                     </p>
                   </div>
                 </div>
@@ -1316,20 +1323,6 @@ ${meeting.transcript}
                   <div className="p-3 bg-emerald-50 border border-emerald-105 rounded-xl text-[11px] text-emerald-850 leading-relaxed">
                     <span className="font-bold text-emerald-950 flex items-center gap-1">✅ ¡Enviado con Éxito!</span>
                     <p className="mt-0.5 text-emerald-700">{emailSuccess}</p>
-                    
-                    {testMessageBoxUrl && (
-                      <div className="mt-2 pt-2 border-t border-emerald-100 flex items-center justify-between">
-                        <span className="text-[10px] text-emerald-650">Bandeja de Pruebas Activa:</span>
-                        <a
-                          href={testMessageBoxUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="px-2.5 py-1 bg-emerald-600 font-bold hover:bg-emerald-700 text-white rounded-md text-[10px] transition-colors inline-block text-center cursor-pointer"
-                        >
-                          Ver Correo en Ethereal 📥
-                        </a>
-                      </div>
-                    )}
                   </div>
                 )}
 
@@ -1372,7 +1365,7 @@ ${meeting.transcript}
                   ) : (
                     <>
                       <Mail className="w-3.5 h-3.5 shrink-0" />
-                      <span>Enviar Correo</span>
+                      <span>Enviar / Abrir Correo</span>
                     </>
                   )}
                 </button>

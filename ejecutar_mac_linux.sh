@@ -1,8 +1,8 @@
 #!/bin/bash
 # ===================================================
-#     MeetingBrain - Editor de Actas y Reuniones
+#     Olli - Editor de Actas y Reuniones
 # ===================================================
-echo "Iniciando MeetingBrain local..."
+echo "Iniciando Olli local..."
 
 # Ir al directorio del script
 cd "$(dirname "$0")"

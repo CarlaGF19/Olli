@@ -65,7 +65,7 @@ export default function Sidebar({
     },
     {
       id: "3",
-      title: "Bienvenido a MeetBrain",
+      title: "Bienvenido a Olli",
       description: "Comienza a grabar para transcribir y resumir tus clases con IA.",
       time: "Ayer",
       unread: false

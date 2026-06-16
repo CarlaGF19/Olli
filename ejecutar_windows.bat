@@ -1,7 +1,7 @@
 @echo off
-title Iniciando MeetingBrain Local
+title Iniciando Olli Local
 echo ===================================================
-echo     MeetingBrain - Editor de Actas y Reuniones
+echo     Olli - Editor de Actas y Reuniones
 echo ===================================================
 echo  Buscando e inicializando servidor local...
 echo.
