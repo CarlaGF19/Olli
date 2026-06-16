@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Meeting, MeetingFolder } from "../types";
 import { formatInUTC5 } from "../lib/dateUtils";
 import { cleanTextForExport } from "../lib/textCleanup";
@@ -76,6 +76,7 @@ export default function MeetingViewer({
   const [folderError, setFolderError] = useState("");
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitleValue, setEditTitleValue] = useState("");
+  const [isMeetingMenuOpen, setIsMeetingMenuOpen] = useState(false);
   const [activeDocTab, setActiveDocTab] = useState<"transcript" | "summary">("transcript");
   
   // Custom states for draft summarization
@@ -189,19 +190,34 @@ Puedes pedirme decisiones, tareas, resumen ejecutivo o preguntas sobre la transc
   };
 
   // Search and filter meetings
-  const filteredMeetings = meetings.filter((meeting) => {
-    return (
-      selectedFolderFilter === "all" ||
-      (selectedFolderFilter === "none" ? !meeting.folderId : meeting.folderId === selectedFolderFilter)
-    );
-  });
+  const filteredMeetings = useMemo(() => {
+    return meetings
+      .filter((meeting) => (
+        selectedFolderFilter === "all" ||
+        (selectedFolderFilter === "none" ? !meeting.folderId : meeting.folderId === selectedFolderFilter)
+      ))
+      .slice()
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  }, [meetings, selectedFolderFilter]);
 
   useEffect(() => {
     if (filteredMeetings.length === 0) return;
-    if (!selectedMeeting || !filteredMeetings.some((meeting) => meeting.id === selectedMeeting.id)) {
+    if (!selectedMeeting) {
+      const lastMeetingId = typeof window !== "undefined" ? window.localStorage.getItem("olli_last_explore_meeting") : null;
+      const lastMeeting = filteredMeetings.find((meeting) => meeting.id === lastMeetingId);
+      onSelectMeeting(lastMeeting || filteredMeetings[0]);
+      return;
+    }
+    if (!filteredMeetings.some((meeting) => meeting.id === selectedMeeting.id)) {
       onSelectMeeting(filteredMeetings[0]);
     }
-  }, [selectedFolderFilter, filteredMeetings, selectedMeeting, onSelectMeeting]);
+  }, [filteredMeetings, selectedMeeting, onSelectMeeting]);
+
+  useEffect(() => {
+    if (selectedMeeting?.id && typeof window !== "undefined") {
+      window.localStorage.setItem("olli_last_explore_meeting", selectedMeeting.id);
+    }
+  }, [selectedMeeting?.id]);
 
   const handleCreateFolder = async () => {
     const cleanName = newFolderName.trim();
@@ -229,6 +245,38 @@ Puedes pedirme decisiones, tareas, resumen ejecutivo o preguntas sobre la transc
   const activeMeeting = selectedMeeting && filteredMeetings.some((meeting) => meeting.id === selectedMeeting.id)
     ? selectedMeeting
     : null;
+
+  const selectedMeetingIndex = selectedMeeting
+    ? filteredMeetings.findIndex((meeting) => meeting.id === selectedMeeting.id)
+    : -1;
+
+  const selectMeetingFromMenu = (meeting: Meeting) => {
+    setIsMeetingMenuOpen(false);
+    onSelectMeeting(meeting);
+  };
+
+  const goToAdjacentMeeting = (direction: -1 | 1) => {
+    if (selectedMeetingIndex < 0) return;
+    const nextIndex = selectedMeetingIndex + direction;
+    if (nextIndex < 0 || nextIndex >= filteredMeetings.length) return;
+    selectMeetingFromMenu(filteredMeetings[nextIndex]);
+  };
+
+  const getMeetingStatus = (meeting: Meeting) => {
+    const transcriptWords = cleanTextForExport(meeting.transcript, { fallback: "", maxWords: 80 })
+      .split(/\s+/)
+      .filter(Boolean).length;
+
+    if (meeting.summary && !meeting.isDraft) return "Resumen listo";
+    if (transcriptWords > 20) return "Transcripcion";
+    if (meeting.isDraft) return "Borrador";
+    return "Sin texto";
+  };
+
+  const getMeetingFolderLabel = (meeting: Meeting) => {
+    if (!meeting.folderId) return "Sin carpeta";
+    return folders.find((folder) => folder.id === meeting.folderId)?.name || "Carpeta";
+  };
 
   const getSummarySections = (meeting: Meeting) => {
     const cleanSummary = cleanTextForExport(meeting.summary, {
@@ -761,16 +809,124 @@ ${meeting.transcript}
                       </button>
                     </div>
                   ) : (
-                    <h1
-                      onClick={() => startEditTitle(selectedMeeting)}
-                      className="text-2xl font-black text-[#111111] tracking-tight leading-snug cursor-pointer group hover:text-[#135bf1] flex items-center shrink-0"
-                      title="Click to rename"
-                    >
-                      <span className="truncate">{selectedMeeting.title}</span>
-                      <span className="text-[10px] text-slate-300 ml-2 font-medium opacity-0 group-hover:opacity-100 transition-opacity">
-                        [Click to Edit]
+                    <div className="flex flex-wrap items-center gap-2 min-w-0">
+                      <button
+                        type="button"
+                        onClick={() => goToAdjacentMeeting(-1)}
+                        disabled={selectedMeetingIndex <= 0}
+                        className="h-9 w-9 inline-flex items-center justify-center rounded-xl border border-[#E9E9EB] bg-white text-slate-500 hover:text-[#135bf1] hover:border-[#135bf1]/20 disabled:opacity-35 disabled:cursor-not-allowed transition-colors"
+                        title="Reunion anterior"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </button>
+
+                      <div className="relative min-w-0 max-w-full">
+                        <button
+                          type="button"
+                          onClick={() => setIsMeetingMenuOpen((open) => !open)}
+                          className="group flex max-w-[min(560px,calc(100vw-760px))] min-w-[260px] items-center gap-2 rounded-xl border border-transparent px-1 py-1 text-left hover:border-[#E9E9EB] hover:bg-slate-50 transition-colors"
+                          title="Cambiar de borrador o transcripcion"
+                        >
+                          <span className="truncate text-2xl font-black text-[#111111] tracking-tight leading-snug group-hover:text-[#135bf1]">
+                            {selectedMeeting.title}
+                          </span>
+                          <ChevronRight className={`w-4 h-4 shrink-0 text-slate-400 transition-transform ${isMeetingMenuOpen ? "-rotate-90" : "rotate-90"}`} />
+                        </button>
+
+                        <AnimatePresence>
+                          {isMeetingMenuOpen && (
+                            <motion.div
+                              initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                              animate={{ opacity: 1, y: 0, scale: 1 }}
+                              exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                              transition={{ duration: 0.14 }}
+                              className="absolute left-0 top-full z-50 mt-2 w-[min(520px,calc(100vw-140px))] overflow-hidden rounded-2xl border border-[#E5E7EB] bg-white shadow-2xl"
+                            >
+                              <div className="flex items-center justify-between border-b border-[#F1F5F9] px-4 py-3">
+                                <div>
+                                  <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">Borradores y transcripciones</p>
+                                  <p className="text-xs font-semibold text-slate-500">{filteredMeetings.length} disponibles en este filtro</p>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setIsMeetingMenuOpen(false)}
+                                  className="h-7 w-7 inline-flex items-center justify-center rounded-lg text-slate-400 hover:bg-slate-50 hover:text-slate-700"
+                                  title="Cerrar"
+                                >
+                                  <X className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+
+                              <div className="max-h-[360px] overflow-y-auto p-2">
+                                {filteredMeetings.map((meeting, index) => {
+                                  const isCurrent = meeting.id === selectedMeeting.id;
+                                  const status = getMeetingStatus(meeting);
+                                  return (
+                                    <button
+                                      key={meeting.id}
+                                      type="button"
+                                      onClick={() => selectMeetingFromMenu(meeting)}
+                                      className={`w-full rounded-xl px-3 py-3 text-left transition-colors ${
+                                        isCurrent
+                                          ? "bg-[#135bf1]/8 border border-[#135bf1]/20"
+                                          : "border border-transparent hover:bg-slate-50"
+                                      }`}
+                                    >
+                                      <div className="flex items-start justify-between gap-3">
+                                        <div className="min-w-0">
+                                          <div className="flex items-center gap-2">
+                                            <span className="text-[10px] font-black text-slate-400">{index + 1}</span>
+                                            <p className="truncate text-sm font-black text-slate-900">{meeting.title}</p>
+                                          </div>
+                                          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] font-semibold text-slate-500">
+                                            <span>{formatInUTC5(meeting.date, "datetime")}</span>
+                                            <span>{meeting.duration}</span>
+                                            <span>{getMeetingFolderLabel(meeting)}</span>
+                                          </div>
+                                        </div>
+                                        <span className={`shrink-0 rounded-full px-2 py-1 text-[10px] font-black ${
+                                          status === "Resumen listo"
+                                            ? "bg-emerald-50 text-emerald-700"
+                                            : status === "Transcripcion"
+                                              ? "bg-blue-50 text-[#135bf1]"
+                                              : status === "Borrador"
+                                                ? "bg-amber-50 text-amber-700"
+                                                : "bg-slate-100 text-slate-500"
+                                        }`}>
+                                          {status}
+                                        </span>
+                                      </div>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => goToAdjacentMeeting(1)}
+                        disabled={selectedMeetingIndex < 0 || selectedMeetingIndex >= filteredMeetings.length - 1}
+                        className="h-9 w-9 inline-flex items-center justify-center rounded-xl border border-[#E9E9EB] bg-white text-slate-500 hover:text-[#135bf1] hover:border-[#135bf1]/20 disabled:opacity-35 disabled:cursor-not-allowed transition-colors"
+                        title="Siguiente reunion"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </button>
+
+                      <span className="rounded-full bg-slate-100 px-3 py-1.5 text-[11px] font-black text-slate-500">
+                        {selectedMeetingIndex >= 0 ? selectedMeetingIndex + 1 : 0} de {filteredMeetings.length}
                       </span>
-                    </h1>
+
+                      <button
+                        type="button"
+                        onClick={() => startEditTitle(selectedMeeting)}
+                        className="rounded-lg px-2 py-1 text-[11px] font-bold text-slate-400 hover:bg-slate-50 hover:text-[#135bf1] transition-colors"
+                      >
+                        Editar
+                      </button>
+                    </div>
                   )}
                   
                   <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 mt-3 font-semibold">
@@ -1046,10 +1202,10 @@ ${meeting.transcript}
                 <motion.aside
                   id="olli_assistant_column"
                   initial={{ width: 0, opacity: 0 }}
-                  animate={{ width: 440, opacity: 1 }}
+                  animate={{ width: 380, opacity: 1 }}
                   exit={{ width: 0, opacity: 0 }}
                   transition={{ type: "tween", duration: 0.2 }}
-                  className="bg-white flex flex-col h-full shrink-0 border-l border-[#E5E7EB] overflow-hidden"
+                  className="bg-white flex flex-col h-full min-w-0 shrink-0 border-l border-[#E5E7EB] overflow-hidden"
                 >
                   <div className="h-16 px-5 border-b border-[#E5E7EB] flex items-center justify-between bg-white">
                     <div className="flex items-center gap-3 min-w-0">
@@ -1144,7 +1300,6 @@ ${meeting.transcript}
                   <div className="border-t border-[#E5E7EB] bg-white p-4">
                     <div className="mb-3 flex items-center justify-between gap-3 rounded-t-2xl bg-blue-50 px-4 py-2 text-[11px] text-slate-600">
                       <span className="font-semibold">Tu chat es privado. Las respuestas usan Gemini y consumen API.</span>
-                      <span className="font-bold text-[#135bf1] shrink-0">Entendido.</span>
                     </div>
                     <form
                       onSubmit={(e) => {
@@ -1157,7 +1312,7 @@ ${meeting.transcript}
                     >
                       <div className="flex items-center gap-2 mb-3">
                         <span className="inline-flex w-8 h-8 items-center justify-center rounded-full border border-[#E5E7EB] text-slate-500">@</span>
-                        <span className="max-w-[260px] truncate rounded-full border border-[#E5E7EB] px-3 py-1.5 text-[11px] font-bold text-slate-700">
+                        <span className="max-w-[210px] truncate rounded-full border border-[#E5E7EB] px-3 py-1.5 text-[11px] font-bold text-slate-700">
                           {selectedMeeting.title}
                         </span>
                       </div>
