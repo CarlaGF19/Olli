@@ -1384,6 +1384,9 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
   const visibleWordCount = visibleLiveTranscript.trim()
     ? visibleLiveTranscript.trim().split(/\s+/).filter(Boolean).length
     : draftWordCount;
+  const isLiveTranscriptionActive = isRecording && !isPaused && !isProcessing && (
+    captureSource === "mic" || digitalLiveEnabled || isDigitalLiveTranscribing
+  );
 
   const getFriendlyErrorMessage = (message: string) => {
     const raw = message || "";
@@ -1817,8 +1820,16 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
                     <div className="flex-1 bg-white border border-slate-200/70 rounded-2xl p-4 flex flex-col items-stretch text-left shadow-2xs">
                       {/* Box Header */}
                       <div className="flex items-center justify-between mb-3 pb-2 border-b border-slate-200/55">
-                        <div className="flex items-center space-x-1.5 text-[10px] font-bold text-rose-500 uppercase tracking-widest">
-                          <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse inline-block" />
+                        <div className={`flex items-center space-x-1.5 text-[10px] font-bold uppercase tracking-widest ${
+                          isLiveTranscriptionActive ? "text-[#135bf1]" : "text-rose-500"
+                        }`}>
+                          <span className={`relative inline-flex h-2 w-2 rounded-full ${
+                            isLiveTranscriptionActive ? "bg-[#135bf1]" : "bg-rose-500 animate-pulse"
+                          }`}>
+                            {isLiveTranscriptionActive && (
+                              <span className="absolute inline-flex h-full w-full rounded-full bg-[#135bf1] opacity-70 animate-ping" />
+                            )}
+                          </span>
                           <span>Transcripcion de clase en vivo</span>
                         </div>
                         <div className="flex items-center gap-2">
@@ -1856,11 +1867,17 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
                         style={{ height: "clamp(360px, 52vh, 560px)", maxHeight: "560px", minHeight: "360px" }}
                       >
                         <div className="flex items-start gap-3">
-                          <div className="w-9 h-9 rounded-xl bg-[#135bf1]/8 border border-[#135bf1]/15 flex items-center justify-center shrink-0 select-none">
+                          <div className="relative w-9 h-9 rounded-xl bg-[#135bf1]/8 border border-[#135bf1]/15 flex items-center justify-center shrink-0 select-none">
+                            {isLiveTranscriptionActive && (
+                              <>
+                                <span className="absolute inset-0 rounded-xl bg-[#135bf1]/20 animate-ping" />
+                                <span className="absolute -inset-1 rounded-2xl border border-[#135bf1]/20 animate-pulse" />
+                              </>
+                            )}
                             {captureSource === "screen" ? (
-                              <Volume2 className="w-4.5 h-4.5 text-[#135bf1]" />
+                              <Volume2 className="relative z-10 w-4.5 h-4.5 text-[#135bf1]" />
                             ) : (
-                              <Mic className="w-4.5 h-4.5 text-[#135bf1]" />
+                              <Mic className="relative z-10 w-4.5 h-4.5 text-[#135bf1]" />
                             )}
                           </div>
                           
