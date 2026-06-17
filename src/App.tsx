@@ -28,6 +28,7 @@ import {
   deleteUserAccountFromCloud,
   logoutLocalAccount
 } from "./lib/db";
+import { purgeOlliBrowserData } from "./lib/browserDataPurge";
 
 // 1. Pristine demo meetings seeding standard structured outputs
 const INITIAL_DEMO_MEETINGS: Meeting[] = [
@@ -237,10 +238,12 @@ export default function App() {
     setMobileMenuOpen(false);
   };
 
-  const handleDeleteAccount = async () => {
+  const handleDeleteAccount = async (confirmationCode: string) => {
     if (!user) return;
     try {
-      await deleteUserAccountFromCloud(user.uid);
+      const currentUserId = user.uid;
+      await deleteUserAccountFromCloud(currentUserId, confirmationCode);
+      await purgeOlliBrowserData(currentUserId);
       setUser(null);
       setMeetings([]);
       setMeetingFolders([]);

@@ -25,12 +25,13 @@ import {
   Lock
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { AccountDeletionPreview, fetchAccountDeletionPreview } from "../lib/db";
 
 interface SettingsPanelProps {
   settings: AppSettings;
   onSaveSettings: (settings: AppSettings) => void;
   defaultTab?: "general" | "api" | "integrations" | "security";
-  onDeleteAccount: () => Promise<void>;
+  onDeleteAccount: (confirmationCode: string) => Promise<void>;
 }
 
 export default function SettingsPanel({
@@ -51,7 +52,11 @@ export default function SettingsPanel({
   const [showPassword, setShowPassword] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
-  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [deleteCodeInput, setDeleteCodeInput] = useState("");
+  const [deletePreview, setDeletePreview] = useState<AccountDeletionPreview | null>(null);
+  const [deleteError, setDeleteError] = useState("");
+  const [isLoadingDeletePreview, setIsLoadingDeletePreview] = useState(false);
+  const [deleteAccepted, setDeleteAccepted] = useState(false);
 
   // Sync state if defaultTab prop changes (e.g. clicking sidebar menu updates it)
   useEffect(() => {
@@ -80,19 +85,35 @@ export default function SettingsPanel({
     }, 2500);
   };
 
+  const openDeleteConfirm = async () => {
+    setShowDeleteConfirm(true);
+    setDeleteCodeInput("");
+    setDeleteAccepted(false);
+    setDeleteError("");
+    setDeletePreview(null);
+    setIsLoadingDeletePreview(true);
+    try {
+      const preview = await fetchAccountDeletionPreview();
+      setDeletePreview(preview);
+    } catch (err: any) {
+      setDeleteError(err?.message || "No se pudo generar el codigo de eliminacion.");
+    } finally {
+      setIsLoadingDeletePreview(false);
+    }
+  };
+
   const handleDeleteTrigger = async () => {
-    if (deleteConfirmText !== "ELIMINAR") {
-      alert("Por favor escribe 'ELIMINAR' para confirmar la desactivación.");
+    if (!deletePreview || deleteCodeInput.trim() !== deletePreview.confirmationCode || !deleteAccepted) {
+      setDeleteError("Escribe el codigo numerico de 6 digitos y marca la confirmacion.");
       return;
     }
     setIsDeleting(true);
     try {
-      await onDeleteAccount();
-    } catch (err) {
-      alert("Fallo al eliminar cuenta. Vuelva a intentarlo.");
+      await onDeleteAccount(deleteCodeInput.trim());
+    } catch (err: any) {
+      setDeleteError(err?.message || "Fallo al eliminar cuenta. Vuelve a intentarlo.");
     } finally {
       setIsDeleting(false);
-      setShowDeleteConfirm(false);
     }
   };
 
@@ -504,7 +525,7 @@ export default function SettingsPanel({
                     <div className="mt-4">
                       <button
                         type="button"
-                        onClick={() => setShowDeleteConfirm(true)}
+                        onClick={openDeleteConfirm}
                         className="px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold shadow-md shadow-red-100 transition-all cursor-pointer inline-flex items-center gap-1.5 active:scale-95"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -559,24 +580,69 @@ export default function SettingsPanel({
                   <ShieldAlert className="w-5 h-5 text-red-600" />
                 </div>
                 <div>
-                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide leading-none">Confirmar Desactivación de Cuenta</h3>
-                  <p className="text-[10px] text-slate-400 mt-1">Medida para prevenir accidentes del servidor</p>
+                  <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide leading-none">Confirmar Eliminacion Definitiva</h3>
+                  <p className="text-[10px] text-slate-400 mt-1">El codigo vence en 3 minutos</p>
                 </div>
               </div>
 
               <div className="space-y-3.5">
-                <p className="text-[11px] text-slate-600 leading-relaxed">
-                  Para confirmar que deseas borrar de manera permanente tus API Keys guardadas, transcripciones, audios e historial de usuario, escribe <strong className="text-red-700">ELIMINAR</strong> a continuación:
-                </p>
+                {isLoadingDeletePreview ? (
+                  <div className="rounded-2xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-500">
+                    Generando codigo de eliminacion...
+                  </div>
+                ) : deletePreview ? (
+                  <>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="rounded-2xl border border-red-100 bg-red-50/50 p-3">
+                        <span className="block text-[10px] font-black uppercase text-red-500">Tamano estimado</span>
+                        <strong className="text-lg font-black text-slate-900">{deletePreview.estimatedHumanSize}</strong>
+                      </div>
+                      <div className="rounded-2xl border border-slate-100 bg-white p-3">
+                        <span className="block text-[10px] font-black uppercase text-slate-400">Se borrara</span>
+                        <strong className="text-sm font-black text-slate-900">
+                          {deletePreview.meetings} reuniones - {deletePreview.folders} carpetas
+                        </strong>
+                      </div>
+                    </div>
 
-                <input
-                  type="text"
-                  value={deleteConfirmText}
-                  onChange={(e) => setDeleteConfirmText(e.target.value)}
-                  placeholder="Escribe ELIMINAR"
-                  disabled={isDeleting}
-                  className="w-full px-4 text-xs py-2.5 bg-red-50/40 border border-red-200 rounded-xl focus:outline-none focus:bg-white text-slate-800 font-bold uppercase tracking-widest placeholder-red-300"
-                />
+                    <div className="rounded-2xl border border-red-200 bg-white p-3">
+                      <p className="text-[11px] text-slate-600 leading-relaxed">
+                        Escribe este codigo numerico para confirmar. Expira en <strong className="text-red-700">3 minutos</strong>.
+                      </p>
+                      <div className="mt-2 rounded-xl bg-red-50 px-4 py-3 text-center font-mono text-2xl font-black tracking-[0.3em] text-red-700">
+                        {deletePreview.confirmationCode}
+                      </div>
+                    </div>
+
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      value={deleteCodeInput}
+                      onChange={(e) => setDeleteCodeInput(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      placeholder="Escribe el codigo de 6 digitos"
+                      disabled={isDeleting}
+                      className="w-full px-4 text-sm py-3 bg-red-50/40 border border-red-200 rounded-xl focus:outline-none focus:bg-white text-slate-800 font-bold tracking-widest placeholder-red-300"
+                    />
+
+                    <label className="flex items-start gap-2 rounded-xl border border-slate-100 bg-slate-50 p-3 text-[11px] font-semibold text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={deleteAccepted}
+                        onChange={(e) => setDeleteAccepted(e.target.checked)}
+                        disabled={isDeleting}
+                        className="mt-0.5"
+                      />
+                      <span>Entiendo que se eliminaran cuenta, sesiones, API key, reuniones, carpetas y codigos de recuperacion sin opcion de restauracion.</span>
+                    </label>
+                  </>
+                ) : null}
+
+                {deleteError && (
+                  <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-semibold text-red-700">
+                    {deleteError}
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-end gap-3 mt-6 pt-4 border-t border-slate-50">
@@ -584,7 +650,9 @@ export default function SettingsPanel({
                   type="button"
                   disabled={isDeleting}
                   onClick={() => {
-                    setDeleteConfirmText("");
+                    setDeleteCodeInput("");
+                    setDeleteAccepted(false);
+                    setDeleteError("");
                     setShowDeleteConfirm(false);
                   }}
                   className="px-4 py-2 border border-slate-200 text-slate-500 hover:bg-slate-55 rounded-xl text-xs font-bold cursor-pointer"
@@ -593,7 +661,7 @@ export default function SettingsPanel({
                 </button>
                 <button
                   type="button"
-                  disabled={isDeleting || deleteConfirmText !== "ELIMINAR"}
+                  disabled={isDeleting || isLoadingDeletePreview || !deletePreview || deleteCodeInput.trim() !== deletePreview.confirmationCode || !deleteAccepted}
                   onClick={handleDeleteTrigger}
                   className="px-5 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-md shadow-red-100"
                 >

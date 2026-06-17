@@ -48,6 +48,17 @@ export type LocalMeetingFolder = {
   createdAt: string;
 };
 
+export type AccountDeletionPreview = {
+  meetings: number;
+  folders: number;
+  drafts: number;
+  sessions: number;
+  recoveryCodes: number;
+  hasApiKey: boolean;
+  estimatedBytes: number;
+  estimatedHumanSize: string;
+};
+
 const DATA_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "meetbrain.sqlite");
 const SESSION_DAYS = 14;
@@ -224,6 +235,16 @@ function verifyScrypt(value: string, hash: string, salt: string) {
   const incoming = crypto.scryptSync(value, salt, 64);
   const stored = Buffer.from(hash, "hex");
   return stored.length === incoming.length && crypto.timingSafeEqual(stored, incoming);
+}
+
+function byteLength(value: unknown) {
+  return Buffer.byteLength(String(value ?? ""), "utf8");
+}
+
+function formatBytes(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
 function createRecoveryCode() {
@@ -553,8 +574,68 @@ export async function saveSettings(userId: string, settings: LocalSettings) {
   persist(db);
 }
 
-export async function deleteAccount(userId: string) {
+export async function getAccountDeletionPreview(userId: string): Promise<AccountDeletionPreview> {
   const db = await getDb();
+  const meetings = getAll<any>(db, "SELECT * FROM meetings WHERE user_id = ?", [userId]);
+  const folders = getAll<any>(db, "SELECT * FROM meeting_folders WHERE user_id = ?", [userId]);
+  const sessions = getAll<any>(db, "SELECT token_hash, created_at, expires_at FROM sessions WHERE user_id = ?", [userId]);
+  const recoveryCodes = getAll<any>(
+    db,
+    "SELECT code_hash, code_salt, created_at, expires_at, used_at FROM password_recovery_codes WHERE user_id = ?",
+    [userId]
+  );
+  const settings = getSingle<any>(db, "SELECT * FROM settings WHERE user_id = ?", [userId]);
+
+  let estimatedBytes = 0;
+  for (const meeting of meetings) {
+    estimatedBytes += byteLength(meeting.id);
+    estimatedBytes += byteLength(meeting.title);
+    estimatedBytes += byteLength(meeting.date);
+    estimatedBytes += byteLength(meeting.duration);
+    estimatedBytes += byteLength(meeting.transcript);
+    estimatedBytes += byteLength(meeting.summary);
+    estimatedBytes += byteLength(meeting.audio_mime_type);
+    estimatedBytes += Number(meeting.audio_size_kb || 0) * 1024;
+  }
+
+  for (const folder of folders) {
+    estimatedBytes += byteLength(folder.id) + byteLength(folder.name);
+  }
+
+  if (settings) {
+    estimatedBytes += byteLength(settings.ai_provider);
+    estimatedBytes += byteLength(settings.api_key);
+    estimatedBytes += byteLength(settings.audio_folder);
+  }
+
+  estimatedBytes += sessions.length * 160;
+  estimatedBytes += recoveryCodes.length * 260;
+
+  return {
+    meetings: meetings.length,
+    folders: folders.length,
+    drafts: meetings.filter((meeting) => !!meeting.is_draft).length,
+    sessions: sessions.length,
+    recoveryCodes: recoveryCodes.length,
+    hasApiKey: !!settings?.api_key,
+    estimatedBytes,
+    estimatedHumanSize: formatBytes(estimatedBytes),
+  };
+}
+
+export async function deleteAccountPermanently(userId: string) {
+  const db = await getDb();
+  const preview = await getAccountDeletionPreview(userId);
+  db.run("DELETE FROM sessions WHERE user_id = ?", [userId]);
+  db.run("DELETE FROM password_recovery_codes WHERE user_id = ?", [userId]);
+  db.run("DELETE FROM settings WHERE user_id = ?", [userId]);
+  db.run("DELETE FROM meetings WHERE user_id = ?", [userId]);
+  db.run("DELETE FROM meeting_folders WHERE user_id = ?", [userId]);
   db.run("DELETE FROM users WHERE id = ?", [userId]);
   persist(db);
+  return preview;
+}
+
+export async function deleteAccount(userId: string) {
+  await deleteAccountPermanently(userId);
 }

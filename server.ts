@@ -1,14 +1,16 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
+import { randomInt } from "crypto";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
 import nodemailer from "nodemailer";
 import {
   createMeetingFolder,
-  deleteAccount,
+  deleteAccountPermanently,
   deleteMeetingFolder,
   deleteMeeting,
+  getAccountDeletionPreview,
   getSettings,
   getUserFromSession,
   listMeetingFolders,
@@ -62,6 +64,7 @@ const MAX_AI_TEXT_CHARS = 180_000;
 const MAX_CHAT_HISTORY_MESSAGES = 12;
 const MAX_AUDIO_BASE64_BYTES = 42 * 1024 * 1024;
 const MAX_PDF_BASE64_BYTES = 10 * 1024 * 1024;
+const ACCOUNT_DELETION_CODE_TTL_MS = 3 * 60 * 1000;
 const ALLOWED_AUDIO_MIME_TYPES = new Set([
   "audio/webm",
   "audio/webm;codecs=opus",
@@ -146,11 +149,21 @@ const writeRateLimit = rateLimit({ name: "write", windowMs: 15 * 60 * 1000, max:
 const aiRateLimit = rateLimit({ name: "ai", windowMs: 60 * 60 * 1000, max: 30, includeUser: true });
 const transcribeRateLimit = rateLimit({ name: "transcribe", windowMs: 60 * 60 * 1000, max: 10, includeUser: true });
 const emailRateLimit = rateLimit({ name: "email", windowMs: 60 * 60 * 1000, max: 8, includeUser: true });
+const accountDeletionRateLimit = rateLimit({ name: "account-deletion", windowMs: 15 * 60 * 1000, max: 8, includeUser: true });
+
+const accountDeletionCodes = new Map<string, { code: string; expiresAt: number; attempts: number }>();
+
+function createNumericDeletionCode() {
+  return String(randomInt(100000, 1000000));
+}
 
 setInterval(() => {
   const now = Date.now();
   for (const [key, bucket] of rateLimitBuckets.entries()) {
     if (bucket.resetAt <= now) rateLimitBuckets.delete(key);
+  }
+  for (const [userId, challenge] of accountDeletionCodes.entries()) {
+    if (challenge.expiresAt <= now) accountDeletionCodes.delete(userId);
   }
 }, 10 * 60 * 1000).unref();
 
@@ -390,11 +403,50 @@ app.put("/api/settings", requireLocalUser, writeRateLimit, async (req, res): Pro
   return res.json({ ok: true });
 });
 
-app.delete("/api/account", requireLocalUser, writeRateLimit, async (req, res): Promise<any> => {
+app.get("/api/account/deletion-preview", requireLocalUser, accountDeletionRateLimit, async (req, res): Promise<any> => {
   const user = (req as any).localUser as PublicLocalUser;
-  await deleteAccount(user.uid);
+  const preview = await getAccountDeletionPreview(user.uid);
+  const code = createNumericDeletionCode();
+  const expiresAt = Date.now() + ACCOUNT_DELETION_CODE_TTL_MS;
+  accountDeletionCodes.set(user.uid, { code, expiresAt, attempts: 0 });
+  res.setHeader("Cache-Control", "no-store");
+  return res.json({
+    ...preview,
+    confirmationCode: code,
+    expiresAt: new Date(expiresAt).toISOString(),
+    expiresInSeconds: Math.floor(ACCOUNT_DELETION_CODE_TTL_MS / 1000),
+  });
+});
+
+app.delete("/api/account", requireLocalUser, accountDeletionRateLimit, async (req, res): Promise<any> => {
+  validateJsonPayloadSize(req, 4 * 1024);
+  const user = (req as any).localUser as PublicLocalUser;
+  const confirmationCode = normalizeText(req.body?.confirmationCode, 12);
+  const challenge = accountDeletionCodes.get(user.uid);
+
+  if (!challenge || challenge.expiresAt <= Date.now()) {
+    accountDeletionCodes.delete(user.uid);
+    return res.status(400).json({ error: "El codigo de eliminacion expiro. Genera uno nuevo." });
+  }
+
+  if (challenge.attempts >= 5) {
+    accountDeletionCodes.delete(user.uid);
+    return res.status(429).json({ error: "Demasiados intentos fallidos. Genera un codigo nuevo." });
+  }
+
+  if (confirmationCode !== challenge.code) {
+    challenge.attempts += 1;
+    return res.status(400).json({ error: "Codigo de eliminacion incorrecto." });
+  }
+
+  const deleted = await deleteAccountPermanently(user.uid);
+  accountDeletionCodes.delete(user.uid);
   clearSessionCookie(res);
-  return res.json({ ok: true });
+  return res.json({
+    ok: true,
+    deletedBytes: deleted.estimatedBytes,
+    deletedHumanSize: deleted.estimatedHumanSize,
+  });
 });
 
 // Transcribe and analyze audio

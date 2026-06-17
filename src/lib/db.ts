@@ -7,6 +7,20 @@ import { AppSettings, Meeting, MeetingFolder, User } from "../types";
 
 type ApiOptions = RequestInit & { allow401?: boolean };
 
+export interface AccountDeletionPreview {
+  meetings: number;
+  folders: number;
+  drafts: number;
+  sessions: number;
+  recoveryCodes: number;
+  hasApiKey: boolean;
+  estimatedBytes: number;
+  estimatedHumanSize: string;
+  confirmationCode: string;
+  expiresAt: string;
+  expiresInSeconds: number;
+}
+
 async function api<T>(url: string, options: ApiOptions = {}): Promise<T> {
   const response = await fetch(url, {
     ...options,
@@ -129,8 +143,16 @@ export async function saveUserSettingsToCloud(_userId: string, settings: AppSett
   });
 }
 
-export async function deleteUserAccountFromCloud(_userId: string): Promise<void> {
-  await api("/api/account", {
+export async function fetchAccountDeletionPreview(): Promise<AccountDeletionPreview> {
+  return api("/api/account/deletion-preview");
+}
+
+export async function deleteUserAccountFromCloud(
+  _userId: string,
+  confirmationCode: string
+): Promise<{ deletedBytes: number; deletedHumanSize: string }> {
+  return api("/api/account", {
     method: "DELETE",
+    body: JSON.stringify({ confirmationCode }),
   });
 }
