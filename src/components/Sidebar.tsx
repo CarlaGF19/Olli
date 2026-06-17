@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { AppNotification, User } from "../types";
 import {
   Home,
@@ -13,6 +13,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Bell,
+  X,
   LogOut,
   FolderHeart,
   Settings,
@@ -44,10 +45,17 @@ export default function Sidebar({
 
   const [showNotifications, setShowNotifications] = useState(false);
   const [seenNotificationSignature, setSeenNotificationSignature] = useState("");
-  const notificationSignature = notifications
+  const dismissedStorageKey = `olli_dismissed_notifications_${user.uid}`;
+  const [dismissedNotificationIds, setDismissedNotificationIds] = useState<string[]>(() => readDismissedNotifications(dismissedStorageKey));
+  const visibleNotifications = useMemo(
+    () => notifications.filter((notification) => !dismissedNotificationIds.includes(notification.id)),
+    [dismissedNotificationIds, notifications],
+  );
+  const unreadCount = visibleNotifications.filter((notification) => notification.unread).length;
+  const notificationSignature = visibleNotifications
     .map((notification) => `${notification.id}:${notification.title}:${notification.description}`)
     .join("|");
-  const hasUnread = Boolean(notificationSignature) && notificationSignature !== seenNotificationSignature && notifications.some((notification) => notification.unread);
+  const hasUnread = Boolean(notificationSignature) && notificationSignature !== seenNotificationSignature && unreadCount > 0;
 
   const toggleNotifications = () => {
     const nextState = !showNotifications;
@@ -55,6 +63,18 @@ export default function Sidebar({
     if (nextState) {
       setSeenNotificationSignature(notificationSignature);
     }
+  };
+
+  const dismissNotification = (notificationId: string) => {
+    const nextDismissed = Array.from(new Set([...dismissedNotificationIds, notificationId]));
+    setDismissedNotificationIds(nextDismissed);
+    writeDismissedNotifications(dismissedStorageKey, nextDismissed);
+  };
+
+  const clearVisibleNotifications = () => {
+    const nextDismissed = Array.from(new Set([...dismissedNotificationIds, ...visibleNotifications.map((notification) => notification.id)]));
+    setDismissedNotificationIds(nextDismissed);
+    writeDismissedNotifications(dismissedStorageKey, nextDismissed);
   };
 
   const navItems = [
@@ -101,38 +121,82 @@ export default function Sidebar({
           <div
             className={`absolute bg-white/95 backdrop-blur-md border border-[#E9E9EB] rounded-2xl shadow-xl z-50 flex flex-col overflow-hidden ${
               isCollapsed
-                ? "left-[76px] top-16 w-[320px]"
-                : "right-4 top-16 w-[340px]"
+                ? "left-[78px] top-14 w-[340px]"
+                : "right-4 top-14 w-[360px]"
             }`}
           >
-            <div className="flex items-center justify-between p-3.5 border-b border-[#E9E9EB] bg-slate-50/60">
-              <div>
-                <span className="text-xs font-bold text-[#111111] uppercase tracking-wider">Notificaciones</span>
+            <div className="flex items-start justify-between gap-3 p-3.5 border-b border-[#E9E9EB] bg-slate-50/60">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-[#111111] uppercase tracking-wider">Notificaciones</span>
+                  {unreadCount > 0 && (
+                    <span className="rounded-full bg-[#135bf1]/10 px-2 py-0.5 text-[10px] font-bold text-[#135bf1]">
+                      {unreadCount} nueva{unreadCount === 1 ? "" : "s"}
+                    </span>
+                  )}
+                </div>
                 <p className="text-[10px] text-slate-500 mt-0.5">Estado real de tu espacio local.</p>
               </div>
-              <button
-                onClick={() => setShowNotifications(false)}
-                className="text-[10px] text-slate-400 hover:text-slate-600 font-bold cursor-pointer"
-              >
-                Cerrar
-              </button>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {visibleNotifications.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={clearVisibleNotifications}
+                    className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[10px] font-bold text-slate-500 hover:border-[#135bf1]/25 hover:text-[#135bf1] transition-colors cursor-pointer"
+                  >
+                    Limpiar
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowNotifications(false)}
+                  className="h-7 w-7 rounded-full border border-slate-200 bg-white inline-flex items-center justify-center text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+                  title="Cerrar notificaciones"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
             </div>
 
-            <div className="max-h-[320px] overflow-y-auto divide-y divide-slate-100 py-1">
-              {notifications.length === 0 ? (
-                <div className="p-4 text-left">
+            <div className="max-h-[360px] overflow-y-auto divide-y divide-slate-100">
+              {visibleNotifications.length === 0 ? (
+                <div className="p-5 text-left">
                   <p className="text-xs font-semibold text-[#111111]">Sin novedades por ahora</p>
-                  <p className="text-[10px] text-slate-500 mt-1 leading-normal">Cuando haya borradores, pendientes o cambios importantes apareceran aqui.</p>
+                  <p className="text-[10px] text-slate-500 mt-1 leading-normal">Olli te avisara cuando haya borradores, resumenes pendientes o configuracion importante.</p>
                 </div>
               ) : (
-                notifications.map((notification) => (
-                  <div key={notification.id} className="p-3 text-left hover:bg-slate-50 transition-colors">
-                    <div className="flex items-start justify-between gap-2">
-                      <p className="text-xs font-bold text-[#111111] leading-snug">{notification.title}</p>
-                      <span className={`w-1.5 h-1.5 rounded-full mt-1 shrink-0 ${getNotificationDot(notification)}`} />
+                visibleNotifications.map((notification) => (
+                  <div key={notification.id} className="group p-3.5 text-left hover:bg-slate-50 transition-colors">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`h-2 w-2 rounded-full shrink-0 ${getNotificationDot(notification)}`} />
+                          <p className="text-xs font-bold text-[#111111] leading-snug truncate">{notification.title}</p>
+                        </div>
+                        <p className="text-[10px] text-[#666666] mt-1 leading-normal">{notification.description}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          dismissNotification(notification.id);
+                        }}
+                        className="h-7 w-7 rounded-full border border-transparent inline-flex items-center justify-center text-slate-300 opacity-0 group-hover:opacity-100 hover:border-slate-200 hover:bg-white hover:text-rose-500 focus:opacity-100 transition-all cursor-pointer shrink-0"
+                        title="Eliminar notificacion"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
                     </div>
-                    <p className="text-[10px] text-[#666666] mt-0.5 leading-normal">{notification.description}</p>
-                    <p className="text-[9px] text-slate-400 mt-1">{notification.time}</p>
+                    <div className="mt-2 flex items-center gap-2 pl-4">
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-semibold text-slate-500">
+                        {notification.time}
+                      </span>
+                      {notification.unread && (
+                        <span className="rounded-full bg-[#135bf1]/8 px-2 py-0.5 text-[9px] font-bold text-[#135bf1]">
+                          Pendiente
+                        </span>
+                      )}
+                    </div>
                   </div>
                 ))
               )}
@@ -298,5 +362,24 @@ function getNotificationDot(notification: AppNotification) {
       return "bg-rose-500";
     default:
       return "bg-[#135bf1]";
+  }
+}
+
+function readDismissedNotifications(storageKey: string) {
+  try {
+    const rawValue = localStorage.getItem(storageKey);
+    if (!rawValue) return [];
+    const parsedValue = JSON.parse(rawValue);
+    return Array.isArray(parsedValue) ? parsedValue.filter((item) => typeof item === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeDismissedNotifications(storageKey: string, notificationIds: string[]) {
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(notificationIds));
+  } catch {
+    // localStorage can fail in private or restricted browser contexts.
   }
 }

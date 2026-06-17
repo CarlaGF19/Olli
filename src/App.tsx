@@ -688,7 +688,7 @@ function buildWorkspaceNotifications(meetings: Meeting[], settings: AppSettings)
 
   if (drafts > 0) {
     notifications.push({
-      id: "drafts",
+      id: `drafts-${drafts}`,
       title: `${drafts} borrador${drafts === 1 ? "" : "es"} guardado${drafts === 1 ? "" : "s"}`,
       description: "Hay capturas locales pendientes de revisar o completar en Explore.",
       time: "Local",
@@ -699,7 +699,7 @@ function buildWorkspaceNotifications(meetings: Meeting[], settings: AppSettings)
 
   if (withoutSummary > 0) {
     notifications.push({
-      id: "summary-pending",
+      id: `summary-pending-${withoutSummary}`,
       title: `${withoutSummary} resumen${withoutSummary === 1 ? "" : "es"} pendiente${withoutSummary === 1 ? "" : "s"}`,
       description: "Puedes generar resumen, puntos clave y acciones cuando decidas consumir Gemini.",
       time: "Explore",
@@ -710,7 +710,7 @@ function buildWorkspaceNotifications(meetings: Meeting[], settings: AppSettings)
 
   if (withoutFolder > 0) {
     notifications.push({
-      id: "folder-pending",
+      id: `folder-pending-${withoutFolder}`,
       title: `${withoutFolder} reunion${withoutFolder === 1 ? "" : "es"} sin carpeta`,
       description: "Organizalas por curso o tema desde el selector de carpetas.",
       time: "Explore",
@@ -721,7 +721,7 @@ function buildWorkspaceNotifications(meetings: Meeting[], settings: AppSettings)
 
   if (withAiSummary > 0) {
     notifications.push({
-      id: "ai-applied",
+      id: `ai-applied-${withAiSummary}`,
       title: `${withAiSummary} reunion${withAiSummary === 1 ? "" : "es"} con IA aplicada`,
       description: "Olli detecto resumenes ya generados. Los tokens exactos aun no se registran.",
       time: "Local",
