@@ -48,9 +48,29 @@ export type LocalMeetingFolder = {
   createdAt: string;
 };
 
+export type LocalCourseDocument = {
+  id: string;
+  folderId: string | null;
+  name: string;
+  originalFilename: string;
+  sizeBytes: number;
+  pageCount: number;
+  createdAt: string;
+};
+
+export type LocalLibrarySearchResult = {
+  source: "pdf" | "meeting";
+  id: string;
+  title: string;
+  excerpt: string;
+  score: number;
+  pageNumber?: number;
+  documentId?: string;
+};
 export type AccountDeletionPreview = {
   meetings: number;
   folders: number;
+  documents: number;
   drafts: number;
   sessions: number;
   recoveryCodes: number;
@@ -61,6 +81,7 @@ export type AccountDeletionPreview = {
 
 const DATA_DIR = path.join(process.cwd(), "data");
 const DB_PATH = path.join(DATA_DIR, "meetbrain.sqlite");
+const DOCUMENTS_DIR = path.join(DATA_DIR, "documents");
 const SESSION_DAYS = 14;
 const RECOVERY_DAYS = 3650;
 
@@ -192,6 +213,36 @@ function migrate(db: Database) {
       bypass_size_limit INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS course_documents (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      folder_id TEXT,
+      name TEXT NOT NULL,
+      original_filename TEXT NOT NULL,
+      storage_path TEXT NOT NULL,
+      size_bytes INTEGER NOT NULL,
+      page_count INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS course_document_pages (
+      id TEXT PRIMARY KEY,
+      document_id TEXT NOT NULL,
+      page_number INTEGER NOT NULL,
+      text_content TEXT NOT NULL,
+      FOREIGN KEY (document_id) REFERENCES course_documents(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS folder_ai_permissions (
+      user_id TEXT NOT NULL,
+      folder_id TEXT NOT NULL,
+      enabled_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, folder_id),
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     );
   `);
@@ -534,6 +585,8 @@ export async function deleteMeetingFolder(userId: string, folderId: string) {
     userId,
     folderId,
   ]);
+  db.run("UPDATE course_documents SET folder_id = NULL, updated_at = ? WHERE user_id = ? AND folder_id = ?", [nowIso(), userId, folderId]);
+  db.run("DELETE FROM folder_ai_permissions WHERE user_id = ? AND folder_id = ?", [userId, folderId]);
   db.run("DELETE FROM meeting_folders WHERE id = ? AND user_id = ?", [folderId, userId]);
   persist(db);
 }
@@ -574,10 +627,168 @@ export async function saveSettings(userId: string, settings: LocalSettings) {
   persist(db);
 }
 
+function normalizeSearchText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+}
+
+function scoreSearchText(value: string, terms: string[]) {
+  const normalized = normalizeSearchText(value);
+  return terms.reduce((score, term) => {
+    let start = 0;
+    let matches = 0;
+    while (matches < 8) {
+      const found = normalized.indexOf(term, start);
+      if (found < 0) break;
+      matches += 1;
+      start = found + term.length;
+    }
+    return score + matches;
+  }, 0);
+}
+
+function excerptAroundTerms(value: string, terms: string[]) {
+  const normalized = normalizeSearchText(value);
+  const firstIndex = terms
+    .map((term) => normalized.indexOf(term))
+    .filter((index) => index >= 0)
+    .sort((a, b) => a - b)[0] ?? 0;
+  const start = Math.max(0, firstIndex - 170);
+  const end = Math.min(value.length, start + 460);
+  const prefix = start > 0 ? "..." : "";
+  const suffix = end < value.length ? "..." : "";
+  return `${prefix}${value.slice(start, end).replace(/\s+/g, " ").trim()}${suffix}`;
+}
+
+export async function listCourseDocuments(userId: string, folderId?: string | null): Promise<LocalCourseDocument[]> {
+  const db = await getDb();
+  const rows = folderId
+    ? getAll<any>(db, "SELECT * FROM course_documents WHERE user_id = ? AND folder_id = ? ORDER BY created_at DESC", [userId, folderId])
+    : getAll<any>(db, "SELECT * FROM course_documents WHERE user_id = ? ORDER BY created_at DESC", [userId]);
+  return rows.map((row) => ({
+    id: row.id,
+    folderId: row.folder_id || null,
+    name: row.name,
+    originalFilename: row.original_filename,
+    sizeBytes: Number(row.size_bytes || 0),
+    pageCount: Number(row.page_count || 0),
+    createdAt: row.created_at,
+  }));
+}
+
+export async function getCourseDocumentStoragePath(userId: string, documentId: string) {
+  const db = await getDb();
+  const row = getSingle<any>(db, "SELECT storage_path FROM course_documents WHERE id = ? AND user_id = ?", [documentId, userId]);
+  return row?.storage_path || null;
+}
+
+export async function saveCourseDocument(
+  userId: string,
+  document: { id: string; folderId?: string | null; name: string; originalFilename: string; storagePath: string; sizeBytes: number; pageCount: number },
+  pages: Array<{ pageNumber: number; text: string }>
+) {
+  const db = await getDb();
+  if (document.folderId) {
+    const folder = getSingle<any>(db, "SELECT id FROM meeting_folders WHERE id = ? AND user_id = ?", [document.folderId, userId]);
+    if (!folder) throw new Error("La carpeta del curso no existe.");
+  }
+  const timestamp = nowIso();
+  db.run(
+    `INSERT OR REPLACE INTO course_documents
+      (id, user_id, folder_id, name, original_filename, storage_path, size_bytes, page_count, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT created_at FROM course_documents WHERE id = ?), ?), ?)`,
+    [document.id, userId, document.folderId || null, document.name, document.originalFilename, document.storagePath, document.sizeBytes, document.pageCount, document.id, timestamp, timestamp]
+  );
+  db.run("DELETE FROM course_document_pages WHERE document_id = ?", [document.id]);
+  for (const page of pages) {
+    const cleanText = String(page.text || "").trim().slice(0, 50_000);
+    if (!cleanText) continue;
+    db.run(
+      "INSERT INTO course_document_pages (id, document_id, page_number, text_content) VALUES (?, ?, ?, ?)",
+      [randomId("doc_page"), document.id, Math.max(1, Number(page.pageNumber) || 1), cleanText]
+    );
+  }
+  persist(db);
+}
+
+export async function deleteCourseDocument(userId: string, documentId: string) {
+  const db = await getDb();
+  const row = getSingle<any>(db, "SELECT storage_path FROM course_documents WHERE id = ? AND user_id = ?", [documentId, userId]);
+  if (!row) return null;
+  db.run("DELETE FROM course_documents WHERE id = ? AND user_id = ?", [documentId, userId]);
+  persist(db);
+  return row.storage_path as string;
+}
+
+export async function searchCourseMaterial(userId: string, folderId: string, query: string): Promise<LocalLibrarySearchResult[]> {
+  const terms = normalizeSearchText(query).split(/[^a-z0-9]+/).filter((term) => term.length >= 3).slice(0, 8);
+  if (!terms.length) return [];
+  const db = await getDb();
+  const pageRows = getAll<any>(
+    db,
+    `SELECT pages.document_id, pages.page_number, pages.text_content, documents.name
+     FROM course_document_pages pages
+     JOIN course_documents documents ON documents.id = pages.document_id
+     WHERE documents.user_id = ? AND documents.folder_id = ?`,
+    [userId, folderId]
+  );
+  const meetingRows = getAll<any>(
+    db,
+    "SELECT id, title, transcript, summary FROM meetings WHERE user_id = ? AND folder_id = ?",
+    [userId, folderId]
+  );
+  const pdfResults = pageRows
+    .map((row) => ({
+      source: "pdf" as const,
+      id: `${row.document_id}:${row.page_number}`,
+      documentId: row.document_id,
+      title: row.name,
+      pageNumber: Number(row.page_number),
+      excerpt: excerptAroundTerms(row.text_content, terms),
+      score: scoreSearchText(`${row.name} ${row.text_content}`, terms),
+    }))
+    .filter((result) => result.score > 0);
+  const meetingResults = meetingRows
+    .map((row) => {
+      const content = `${row.transcript || ""}\n${row.summary || ""}`;
+      return {
+        source: "meeting" as const,
+        id: row.id,
+        title: row.title,
+        excerpt: excerptAroundTerms(content, terms),
+        score: scoreSearchText(`${row.title} ${content}`, terms),
+      };
+    })
+    .filter((result) => result.score > 0);
+  return [...pdfResults, ...meetingResults].sort((a, b) => b.score - a.score).slice(0, 8);
+}
+
+export async function getFolderAiPermission(userId: string, folderId: string) {
+  const db = await getDb();
+  return !!getSingle<any>(db, "SELECT folder_id FROM folder_ai_permissions WHERE user_id = ? AND folder_id = ?", [userId, folderId]);
+}
+
+export async function setFolderAiPermission(userId: string, folderId: string, enabled: boolean) {
+  const db = await getDb();
+  const folder = getSingle<any>(db, "SELECT id FROM meeting_folders WHERE id = ? AND user_id = ?", [folderId, userId]);
+  if (!folder) throw new Error("La carpeta del curso no existe.");
+  if (enabled) {
+    db.run(
+      "INSERT OR REPLACE INTO folder_ai_permissions (user_id, folder_id, enabled_at) VALUES (?, ?, ?)",
+      [userId, folderId, nowIso()]
+    );
+  } else {
+    db.run("DELETE FROM folder_ai_permissions WHERE user_id = ? AND folder_id = ?", [userId, folderId]);
+  }
+  persist(db);
+}
 export async function getAccountDeletionPreview(userId: string): Promise<AccountDeletionPreview> {
   const db = await getDb();
   const meetings = getAll<any>(db, "SELECT * FROM meetings WHERE user_id = ?", [userId]);
   const folders = getAll<any>(db, "SELECT * FROM meeting_folders WHERE user_id = ?", [userId]);
+  const documents = getAll<any>(db, "SELECT id, name, original_filename, size_bytes FROM course_documents WHERE user_id = ?", [userId]);
   const sessions = getAll<any>(db, "SELECT token_hash, created_at, expires_at FROM sessions WHERE user_id = ?", [userId]);
   const recoveryCodes = getAll<any>(
     db,
@@ -602,6 +813,11 @@ export async function getAccountDeletionPreview(userId: string): Promise<Account
     estimatedBytes += byteLength(folder.id) + byteLength(folder.name);
   }
 
+  for (const document of documents) {
+    estimatedBytes += Number(document.size_bytes || 0);
+    estimatedBytes += byteLength(document.id) + byteLength(document.name) + byteLength(document.original_filename);
+  }
+
   if (settings) {
     estimatedBytes += byteLength(settings.ai_provider);
     estimatedBytes += byteLength(settings.api_key);
@@ -614,6 +830,7 @@ export async function getAccountDeletionPreview(userId: string): Promise<Account
   return {
     meetings: meetings.length,
     folders: folders.length,
+    documents: documents.length,
     drafts: meetings.filter((meeting) => !!meeting.is_draft).length,
     sessions: sessions.length,
     recoveryCodes: recoveryCodes.length,
@@ -631,6 +848,7 @@ export async function deleteAccountPermanently(userId: string) {
   db.run("DELETE FROM settings WHERE user_id = ?", [userId]);
   db.run("DELETE FROM meetings WHERE user_id = ?", [userId]);
   db.run("DELETE FROM meeting_folders WHERE user_id = ?", [userId]);
+  fs.rmSync(path.join(DOCUMENTS_DIR, userId), { recursive: true, force: true });
   db.run("DELETE FROM users WHERE id = ?", [userId]);
   persist(db);
   return preview;

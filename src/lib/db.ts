@@ -3,13 +3,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { AppSettings, Meeting, MeetingFolder, User } from "../types";
+import { AppSettings, CourseDocument, LibrarySearchResult, Meeting, MeetingFolder, User } from "../types";
 
 type ApiOptions = RequestInit & { allow401?: boolean };
 
 export interface AccountDeletionPreview {
   meetings: number;
   folders: number;
+  documents: number;
   drafts: number;
   sessions: number;
   recoveryCodes: number;
@@ -154,5 +155,51 @@ export async function deleteUserAccountFromCloud(
   return api("/api/account", {
     method: "DELETE",
     body: JSON.stringify({ confirmationCode }),
+  });
+}
+
+export async function fetchCourseDocuments(_userId: string, folderId: string): Promise<CourseDocument[]> {
+  const data = await api<{ documents: CourseDocument[] }>(`/api/documents?folderId=${encodeURIComponent(folderId)}`);
+  return data.documents || [];
+}
+
+export async function uploadCourseDocument(
+  _userId: string,
+  payload: { folderId: string; name: string; originalFilename: string; mimeType: string; fileData: string; pages: Array<{ pageNumber: number; text: string }> }
+): Promise<CourseDocument> {
+  const data = await api<{ document: CourseDocument }>("/api/documents", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  return data.document;
+}
+
+export async function deleteCourseDocument(_userId: string, documentId: string): Promise<void> {
+  await api(`/api/documents/${encodeURIComponent(documentId)}`, { method: "DELETE" });
+}
+
+export async function searchCourseMaterials(_userId: string, folderId: string, query: string): Promise<LibrarySearchResult[]> {
+  const data = await api<{ results: LibrarySearchResult[] }>(
+    `/api/library/search?folderId=${encodeURIComponent(folderId)}&query=${encodeURIComponent(query)}`
+  );
+  return data.results || [];
+}
+
+export async function fetchCourseAiPermission(_userId: string, folderId: string): Promise<boolean> {
+  const data = await api<{ enabled: boolean }>(`/api/folders/${encodeURIComponent(folderId)}/ai-permission`);
+  return !!data.enabled;
+}
+
+export async function saveCourseAiPermission(_userId: string, folderId: string, enabled: boolean): Promise<void> {
+  await api(`/api/folders/${encodeURIComponent(folderId)}/ai-permission`, {
+    method: "PUT",
+    body: JSON.stringify({ enabled }),
+  });
+}
+
+export async function askCourseLibraryAi(_userId: string, folderId: string, query: string): Promise<{ answer: string; sources: LibrarySearchResult[] }> {
+  return api("/api/library/answer", {
+    method: "POST",
+    body: JSON.stringify({ folderId, query }),
   });
 }
