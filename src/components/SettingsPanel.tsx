@@ -600,7 +600,7 @@ export default function SettingsPanel({
                       <div className="rounded-2xl border border-slate-100 bg-white p-3">
                         <span className="block text-[10px] font-black uppercase text-slate-400">Se borrara</span>
                         <strong className="text-sm font-black text-slate-900">
-                          {deletePreview.meetings} reuniones - {deletePreview.folders} carpetas
+                          {deletePreview.meetings} reuniones - {deletePreview.folders} carpetas - {deletePreview.documents} PDFs
                         </strong>
                       </div>
                     </div>
