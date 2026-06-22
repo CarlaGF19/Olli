@@ -528,6 +528,20 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
     return segment;
   };
 
+  const formatTranscriptTimestamp = (totalSeconds: number) => {
+    const seconds = Math.max(0, Math.floor(totalSeconds));
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    return `${String(minutes).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
+  };
+
+  const waitForDigitalLiveIdle = async () => {
+    const deadline = Date.now() + 30_000;
+    while (digitalLiveBusyRef.current && Date.now() < deadline) {
+      await new Promise((resolve) => window.setTimeout(resolve, 80));
+    }
+  };
+
   const flushDigitalLiveTranscript = async (force = false) => {
     if (!digitalLiveEnabledRef.current || captureSourceRef.current !== "screen") return;
     if (digitalLiveBusyRef.current) return;
@@ -555,11 +569,16 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
         return;
       }
 
+      const segmentStartedAt = Math.max(
+        0,
+        durationRef.current - audio.length / Math.max(1, digitalLiveSampleRateRef.current)
+      );
       const transcript = cleanWhisperSegment(await transcribePcmInBrowser(audio, digitalLiveSampleRateRef.current));
       if (transcript) {
         const segment = appendTranscriptSegment(transcript);
         if (!segment.trim()) return;
-        const nextText = `${liveTranscriptRef.current ? `${liveTranscriptRef.current.trim()} ` : ""}${segment}`.trim();
+        const marker = `[${formatTranscriptTimestamp(segmentStartedAt)}]`;
+        const nextText = `${liveTranscriptRef.current ? `${liveTranscriptRef.current.trim()}\n` : ""}${marker} ${segment}`.trim();
         liveTranscriptRef.current = `${nextText} `;
         setLiveTranscript(liveTranscriptRef.current);
         setDraftWordCount(nextText.split(/\s+/).filter(Boolean).length);
@@ -806,6 +825,18 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
         streamRef.current = stream;
       }
 
+      if (captureSource === "screen") {
+        if (!isBrowserWhisperSupported()) {
+          throw new Error("Este navegador no puede ejecutar Whisper local. Usa Microsoft Edge o Google Chrome actualizado para transcribir el audio de la pestaña.");
+        }
+
+        setSpeechErrorNotice("Preparando Whisper local. La primera vez puede tardar mientras se descarga el modelo en este navegador.");
+        await warmupBrowserWhisper();
+        digitalLiveEnabledRef.current = true;
+        setDigitalLiveEnabled(true);
+        setDigitalAudioDebug("Whisper listo. La transcripción local se guardará con marcas de tiempo.");
+        setSpeechErrorNotice(null);
+      }
       // Instantiate HTML MediaRecorder (optimized bitrate for voice recording)
       const options = { mimeType: "audio/webm", audioBitsPerSecond: 64000 };
       let mediaRecorder: MediaRecorder;
@@ -822,31 +853,44 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
       };
 
       mediaRecorder.onstop = async () => {
-        await flushDigitalLiveTranscript(true);
-        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        const finalTranscript = liveTranscriptRef.current || "";
-        const dur = durationRef.current || 0;
-        
-        if (captureSourceRef.current === "screen") {
-          const transcriptText = finalTranscript.trim()
-            ? finalTranscript.trim()
-            : "Audio digital capturado localmente. La transcripcion por IA no se ejecuto automaticamente para evitar consumo innecesario de API. Usa Explore para generar resumen, puntos clave o acciones cuando lo necesites.";
+        try {
+          // Do not release the PCM buffer until Whisper has consumed the final captured segment.
+          await waitForDigitalLiveIdle();
+          await flushDigitalLiveTranscript(true);
+          await waitForDigitalLiveIdle();
 
-          onTranscriptionSuccess({
-            id: currentDraftIdRef.current || undefined,
-            title: `Borrador en vivo - ${new Date().toLocaleDateString("es-CO")}`,
-            transcript: transcriptText,
-            summary: `### Borrador guardado en tiempo real\n\nEsta sesion se guardo localmente mientras capturabas audio de pantalla o pestana.\n\n${transcriptText}`,
-          }, dur);
-        } else if (!finalTranscript.trim()) {
-          console.log("Missing microphone transcript. Using server-side Gemini audio transcription as fallback.");
-          await handleAudioProcess(audioBlob, dur);
-        } else {
-          console.log("Using live speech-to-text text-draft for summarizing.");
-          await handleTextProcess(finalTranscript, dur);
+          const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+          const finalTranscript = liveTranscriptRef.current.trim();
+          const dur = durationRef.current || 0;
+
+          if (captureSourceRef.current === "screen") {
+            if (!finalTranscript) {
+              setErrorMessage(
+                "No se detectó voz transcribible en el audio compartido. No se guardó una transcripción vacía: confirma que compartiste el audio de la pestaña y vuelve a intentarlo."
+              );
+              return;
+            }
+
+            onTranscriptionSuccess({
+              id: currentDraftIdRef.current || undefined,
+              title: `Borrador en vivo - ${new Date().toLocaleDateString("es-CO")}`,
+              transcript: finalTranscript,
+              summary: "Transcripción local capturada con Whisper. Puedes analizarla con IA desde Explore cuando lo necesites.",
+            }, dur);
+          } else if (!finalTranscript) {
+            console.log("Missing microphone transcript. Using server-side Gemini audio transcription as fallback.");
+            await handleAudioProcess(audioBlob, dur);
+          } else {
+            console.log("Using live speech-to-text text-draft for summarizing.");
+            await handleTextProcess(finalTranscript, dur);
+          }
+        } finally {
+          mediaRecorderRef.current = null;
+          stopTracksAndTimers();
+          setIsProcessing(false);
+          setProcessingStatus("");
         }
       };
-
       mediaRecorderRef.current = mediaRecorder;
       mediaRecorder.start(1000);
 
@@ -1049,7 +1093,6 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
         recognitionRef.current = null;
       }
       mediaRecorderRef.current.stop();
-      stopTracksAndTimers();
       isRecordingRef.current = false;
       isPausedRef.current = false;
       setIsRecording(false);
@@ -1916,8 +1959,8 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
                                   </span>
                                   <span className="text-[11px] font-medium text-slate-400 text-center leading-relaxed">
                                     {digitalLiveEnabled
-                                      ? "Whisper esta procesando segmentos dentro del navegador. Si hay voz clara, el texto aparecera aqui."
-                                      : "La app esta grabando el audio localmente. Activa Whisper si necesitas ver palabras durante la captura."}
+                                      ? "Whisper procesa segmentos dentro del navegador. Cada bloque guardado incluye su marca de tiempo."
+                                      : "Preparando la transcripción local. Comparte el audio de la pestaña para detectar voz."}
                                   </span>
                                 </div>
                               ) : visibleLiveTranscript || visibleInterimTranscript ? (
@@ -1979,7 +2022,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
                         className="px-4 py-2 bg-rose-500 hover:bg-rose-600 text-white rounded-full flex items-center space-x-2 font-bold text-[10.5px] uppercase tracking-wider transition-all cursor-pointer shadow-sm active:scale-95"
                       >
                         <Square className="w-3.5 h-3.5 fill-white" />
-                        <span>Terminar y Procesar</span>
+                        <span>{captureSource === "screen" ? "Terminar y guardar" : "Terminar y procesar"}</span>
                       </button>
                     </div>
 
