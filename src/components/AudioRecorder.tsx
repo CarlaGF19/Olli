@@ -20,6 +20,7 @@ interface AudioRecorderProps {
 
 const MAX_RECORDING_SECONDS = 2 * 60 * 60;
 const RECORDING_WARNING_SECONDS = MAX_RECORDING_SECONDS - 10 * 60;
+const MAX_DIGITAL_PCM_BUFFER_SECONDS = 60;
 
 export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpdateDraft, initialMode }: AudioRecorderProps) {
   // Tabs: "record" or "upload"
@@ -266,6 +267,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
   const digitalLiveLastFlushRef = useRef(0);
   const digitalLiveBusyRef = useRef(false);
   const digitalLiveEnabledRef = useRef(false);
+  const digitalLiveOverflowNotifiedRef = useRef(false);
 
   const durationRef = useRef(0);
   const warningNotificationSentRef = useRef(false);
@@ -650,6 +652,16 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
           digitalLivePcmChunksRef.current.push(copy);
           digitalLivePcmSampleCountRef.current += copy.length;
 
+          const maxSamples = Math.round(digitalLiveSampleRateRef.current * MAX_DIGITAL_PCM_BUFFER_SECONDS);
+          while (digitalLivePcmSampleCountRef.current > maxSamples && digitalLivePcmChunksRef.current.length > 0) {
+            const oldest = digitalLivePcmChunksRef.current.shift()!;
+            digitalLivePcmSampleCountRef.current -= oldest.length;
+            if (!digitalLiveOverflowNotifiedRef.current) {
+              digitalLiveOverflowNotifiedRef.current = true;
+              setSpeechErrorNotice("Whisper está procesando más lento que el audio. Olli conservará la parte más reciente para no agotar la memoria del equipo.");
+            }
+          }
+
           let peak = digitalLivePeakRef.current;
           for (let i = 0; i < input.length; i += 1) {
             const value = Math.abs(input[i]);
@@ -730,6 +742,8 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
 
   // 2. Control Handlers for Live Voice Recording
   const startRecording = async () => {
+    captureSourceRef.current = captureSource;
+    digitalLiveOverflowNotifiedRef.current = false;
     // Clean up any existing records, streams or timers to avoid leaks and duplicate sharing banners
     stopTracksAndTimers();
 
@@ -847,7 +861,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
       }
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
+        if (event.data.size > 0 && captureSourceRef.current !== "screen") {
           audioChunksRef.current.push(event.data);
         }
       };
@@ -912,7 +926,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
           let currentSessionFinal = "";
           let currentInterim = "";
 
-          for (let i = 0; i < event.results.length; ++i) {
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
             if (event.results[i].isFinal) {
               currentSessionFinal += event.results[i][0].transcript + " ";
             } else {
@@ -991,7 +1005,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
   };
 
   const pauseRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+    if (mediaRecorderRef.current && isRecordingRef.current) {
       if (isPaused) {
         mediaRecorderRef.current.resume();
         isPausedRef.current = false;
@@ -1070,11 +1084,14 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
 
     } catch (err: any) {
       console.error("Text processing error details:", err);
-      setErrorMessage(err.message || "No se pudo procesar la transcripción de clase.");
-      setFailedSessionData({
+      onTranscriptionSuccess({
+        id: currentDraftIdRef.current || undefined,
+        title: `Transcripción local - ${new Date().toLocaleDateString("es-CO")}`,
         transcript: cleanText,
-        durationSec,
-      });
+        summary: "La transcripción se guardó localmente. No se generó el resumen porque Gemini no respondió o no tiene cuota disponible.",
+      }, durationSec);
+      setErrorMessage("La transcripción se guardó, pero no fue posible generar el resumen con Gemini.");
+      setFailedSessionData(null);
     } finally {
       setIsProcessing(false);
       setProcessingStatus("");
@@ -1082,7 +1099,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
   };
 
   const stopRecording = () => {
-    if (mediaRecorderRef.current && isRecording) {
+    if (mediaRecorderRef.current && isRecordingRef.current) {
       const finalTranscript = liveTranscriptRef.current || liveTranscript || "";
 
       // Stop SpeechRecognition immediately
@@ -1141,16 +1158,11 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
       });
       const base64Data = await base64Promise;
 
-      // Proactively check audio size in client to avoid Vercel Serverless maximum 4.5MB payload limitations before sending
+      // Keep the client payload below the local Express and Gemini safety limits.
       const payloadSizeBytes = base64Data.length;
-      const isBypassed = !!settings.bypassSizeLimit;
-      const limitMb = isBypassed ? 100 : 4.2;
+      const limitMb = 40;
       if (payloadSizeBytes > limitMb * 1024 * 1024) {
-        if (isBypassed) {
-          throw new Error(`El audio grabado superó incluso el límite máximo de 100 MB para entornos locales/VPS (${(payloadSizeBytes / (1024 * 1024)).toFixed(2)} MB). Intenta dividir tu grabación o sesión.`);
-        } else {
-          throw new Error(`El audio grabado es demasiado pesado (${(payloadSizeBytes / (1024 * 1024)).toFixed(2)} MB). Las funciones Serverless de Vercel limitan las transferencias de subida a un máximo de 4.5 MB. Te sugerimos realizar grabaciones más cortas o activar 'Desactivar límites de tamaño de audio' en Settings si corres localmente o en un VPS dedicado.`);
-        }
+        throw new Error(`El audio grabado pesa ${(payloadSizeBytes / (1024 * 1024)).toFixed(2)} MB y supera el límite local de ${limitMb} MB para procesarlo de una sola vez. Divide la grabación en partes más cortas.`);
       }
 
       // 2. Call local `/api/transcribe` backend endpoint (always server-side to adhere to security rules and prevent client browser CORS/shield blockages)
@@ -1203,12 +1215,17 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
 
     } catch (err: any) {
       console.error("Transcription error details:", err);
-      setErrorMessage(err.message || "No se pudo procesar el audio.");
-      if (liveTranscript && liveTranscript.trim().length > 0) {
-        setFailedSessionData({
-          transcript: liveTranscript,
-          durationSec,
-        });
+      const recoveredTranscript = liveTranscriptRef.current.trim();
+      if (recoveredTranscript) {
+        onTranscriptionSuccess({
+          id: currentDraftIdRef.current || undefined,
+          title: `Transcripción local - ${new Date().toLocaleDateString("es-CO")}`,
+          transcript: recoveredTranscript,
+          summary: "La transcripción local se guardó como respaldo. No se pudo analizar el audio ni generar un resumen automático.",
+        }, durationSec);
+        setErrorMessage("La transcripción local se guardó como respaldo, pero el procesamiento de audio no pudo completarse.");
+      } else {
+        setErrorMessage(err.message || "No se pudo procesar el audio.");
       }
     } finally {
       setIsProcessing(false);
