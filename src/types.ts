@@ -31,26 +31,6 @@ export interface MeetingFolder {
   createdAt: string;
 }
 
-export interface CourseDocument {
-  id: string;
-  folderId: string | null;
-  name: string;
-  originalFilename: string;
-  sizeBytes: number;
-  pageCount: number;
-  createdAt: string;
-}
-
-export interface LibrarySearchResult {
-  source: "pdf" | "meeting";
-  id: string;
-  title: string;
-  excerpt: string;
-  score: number;
-  pageNumber?: number;
-  documentId?: string;
-}
-
 export interface AppSettings {
   aiProvider: "gemini" | "custom_openai";
   apiKey?: string;

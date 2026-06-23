@@ -85,13 +85,6 @@ La prioridad del producto es clara: la transcripcion y el chat de apoyo deben se
 - Summary bajo demanda para evitar gasto innecesario de Gemini.
 - Chat de Olli sobre la conversacion seleccionada.
 
-### Biblioteca De Cursos
-
-- Un mismo curso reúne sus reuniones y PDFs mediante la misma carpeta local.
-- Los PDFs se almacenan en `data/documents/` y se indexan localmente por página.
-- La búsqueda consulta primero PDFs y transcripciones del curso, sin consumir Gemini.
-- Gemini se habilita de forma explícita por curso y solo recibe fragmentos locales relevantes cuando el usuario pulsa `IA`.
-- Límite inicial por PDF: 20 MB y documentos con texto seleccionable.
 ### IA Opcional
 
 Gemini se usa solo para tareas que requieren razonamiento o generacion:

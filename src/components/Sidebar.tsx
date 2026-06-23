@@ -17,13 +17,12 @@ import {
   LogOut,
   FolderHeart,
   Settings,
-  BookOpen,
 } from "lucide-react";
 
 interface SidebarProps {
   user: User;
-  activeTab: "dashboard" | "recorder" | "meetings" | "library" | "settings";
-  setActiveTab: (tab: "dashboard" | "recorder" | "meetings" | "library" | "settings") => void;
+  activeTab: "dashboard" | "recorder" | "meetings" | "settings";
+  setActiveTab: (tab: "dashboard" | "recorder" | "meetings" | "settings") => void;
   onLogout: () => void;
   favoritesCount: number;
   notifications: AppNotification[];

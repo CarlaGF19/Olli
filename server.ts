@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import fs from "fs";
-import { randomInt, randomUUID } from "crypto";
+import { randomInt } from "crypto";
 import dotenv from "dotenv";
 import { GoogleGenAI, Type } from "@google/genai";
 import nodemailer from "nodemailer";
@@ -11,10 +11,7 @@ import {
   deleteMeetingFolder,
   deleteMeeting,
   getAccountDeletionPreview,
-  getCourseDocumentStoragePath,
-  getFolderAiPermission,
   getSettings,
-  listCourseDocuments,
   getUserFromSession,
   listMeetingFolders,
   listMeetings,
@@ -24,10 +21,6 @@ import {
   registerLocalUser,
   resetLocalPassword,
   saveMeeting,
-  saveCourseDocument,
-  searchCourseMaterial,
-  setFolderAiPermission,
-  deleteCourseDocument,
   saveSettings,
   updateMeeting,
 } from "./localDb";
@@ -46,15 +39,15 @@ function toFriendlyGeminiError(error: any): string {
   const lower = raw.toLowerCase();
 
   if (raw.includes("429") || lower.includes("quota") || lower.includes("resource_exhausted")) {
-    return "Gemini alcanzÃ³ el lÃ­mite de cuota de tu API key. Espera a que se renueve la cuota o usa otra clave en Settings.";
+    return "Gemini alcanzó el límite de cuota de tu API key. Espera a que se renueve la cuota o usa otra clave en Settings.";
   }
 
   if (raw.includes("401") || raw.includes("403") || lower.includes("api key") || lower.includes("permission")) {
-    return "La API key de Gemini no es vÃ¡lida o no tiene permisos. Revisa la clave guardada en Settings.";
+    return "La API key de Gemini no es válida o no tiene permisos. Revisa la clave guardada en Settings.";
   }
 
   if (lower.includes("payload") || raw.includes("413")) {
-    return "El audio es demasiado pesado para procesarlo de una sola vez. Intenta una grabaciÃ³n mÃ¡s corta.";
+    return "El audio es demasiado pesado para procesarlo de una sola vez. Intenta una grabación más corta.";
   }
 
   return raw.length > 240 ? `${raw.slice(0, 240)}...` : raw;
@@ -71,8 +64,6 @@ const MAX_AI_TEXT_CHARS = 180_000;
 const MAX_CHAT_HISTORY_MESSAGES = 12;
 const MAX_AUDIO_BASE64_BYTES = 42 * 1024 * 1024;
 const MAX_PDF_BASE64_BYTES = 10 * 1024 * 1024;
-const MAX_DOCUMENT_BASE64_BYTES = 20 * 1024 * 1024;
-const DOCUMENTS_ROOT = path.join(process.cwd(), "data", "documents");
 const ACCOUNT_DELETION_CODE_TTL_MS = 3 * 60 * 1000;
 const ALLOWED_AUDIO_MIME_TYPES = new Set([
   "audio/webm",
@@ -105,7 +96,7 @@ app.use((req, res, next) => {
 
 // Keep ordinary API payloads small. Audio transcription is the only route allowed to send larger base64 data.
 app.use((req, res, next) => {
-  const limit = req.path === "/api/transcribe" ? "60mb" : req.path === "/api/documents" ? "32mb" : "8mb";
+  const limit = req.path === "/api/transcribe" ? "60mb" : "8mb";
   return express.json({ limit })(req, res, next);
 });
 app.use(express.urlencoded({ limit: "1mb", extended: true }));
@@ -215,19 +206,6 @@ function cleanBase64Payload(value: unknown, maxBytes: number) {
   return clean;
 }
 
-function safeDocumentFilename(value: unknown) {
-  const name = normalizeText(value, 160).replace(/[\\/:*?"<>|]+/g, "-").trim();
-  return name || "documento.pdf";
-}
-
-function documentPathFromStoragePath(storagePath: string) {
-  const root = path.resolve(DOCUMENTS_ROOT);
-  const resolved = path.resolve(process.cwd(), "data", storagePath);
-  if (!resolved.startsWith(`${root}${path.sep}`)) {
-    throw Object.assign(new Error("Ruta de documento invalida."), { status: 400 });
-  }
-  return resolved;
-}
 function isValidEmail(value: unknown) {
   return typeof value === "string" && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()) && value.length <= 254;
 }
@@ -414,132 +392,6 @@ app.delete("/api/folders/:id", requireLocalUser, writeRateLimit, async (req, res
   return res.json({ ok: true });
 });
 
-app.get("/api/documents", requireLocalUser, async (req, res): Promise<any> => {
-  const user = (req as any).localUser as PublicLocalUser;
-  const folderId = normalizeText(req.query.folderId, 160) || null;
-  return res.json({ documents: await listCourseDocuments(user.uid, folderId) });
-});
-
-app.post("/api/documents", requireLocalUser, writeRateLimit, async (req, res): Promise<any> => {
-  let writtenPath = "";
-  try {
-    validateJsonPayloadSize(req, 32 * 1024 * 1024);
-    const user = (req as any).localUser as PublicLocalUser;
-    const folderId = normalizeText(req.body?.folderId, 160);
-    const mimeType = normalizeText(req.body?.mimeType, 100).toLowerCase();
-    if (!folderId) return res.status(400).json({ error: "Selecciona un curso antes de subir el PDF." });
-    if (mimeType !== "application/pdf") return res.status(400).json({ error: "Solo se permiten archivos PDF." });
-    const base64 = cleanBase64Payload(req.body?.fileData, MAX_DOCUMENT_BASE64_BYTES);
-    const rawPages = Array.isArray(req.body?.pages) ? req.body.pages.slice(0, 800) : [];
-    const pages = rawPages
-      .map((page: any, index: number) => ({
-        pageNumber: Math.max(1, Number(page?.pageNumber) || index + 1),
-        text: normalizeText(page?.text, 50_000),
-      }))
-      .filter((page: any) => page.text.length > 0);
-    if (!pages.length) return res.status(400).json({ error: "No se pudo extraer texto del PDF. Usa un PDF con texto seleccionable." });
-
-    const documentId = `doc_${randomUUID().replace(/-/g, "")}`;
-    const filename = safeDocumentFilename(req.body?.originalFilename || req.body?.name);
-    const storagePath = path.join("documents", user.uid, `${documentId}.pdf`);
-    writtenPath = documentPathFromStoragePath(storagePath);
-    fs.mkdirSync(path.dirname(writtenPath), { recursive: true });
-    fs.writeFileSync(writtenPath, Buffer.from(base64, "base64"));
-
-    await saveCourseDocument(user.uid, {
-      id: documentId,
-      folderId,
-      name: safeDocumentFilename(req.body?.name || filename).replace(/\.pdf$/i, ""),
-      originalFilename: filename,
-      storagePath,
-      sizeBytes: Buffer.byteLength(base64, "base64"),
-      pageCount: pages.length,
-    }, pages);
-
-    return res.status(201).json({ document: (await listCourseDocuments(user.uid, folderId)).find((document) => document.id === documentId) });
-  } catch (error: any) {
-    if (writtenPath && fs.existsSync(writtenPath)) fs.rmSync(writtenPath, { force: true });
-    return res.status(error.status || 400).json({ error: error.message || "No se pudo guardar el PDF local." });
-  }
-});
-
-app.get("/api/documents/:id/file", requireLocalUser, async (req, res): Promise<any> => {
-  try {
-    const user = (req as any).localUser as PublicLocalUser;
-    const storagePath = await getCourseDocumentStoragePath(user.uid, req.params.id);
-    if (!storagePath) return res.status(404).json({ error: "Documento no encontrado." });
-    const filePath = documentPathFromStoragePath(storagePath);
-    if (!fs.existsSync(filePath)) return res.status(404).json({ error: "El archivo local ya no existe." });
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader("Content-Disposition", "inline");
-    res.setHeader("Cache-Control", "private, no-store");
-    return res.sendFile(filePath);
-  } catch (error: any) {
-    return res.status(error.status || 400).json({ error: error.message || "No se pudo abrir el PDF." });
-  }
-});
-
-app.delete("/api/documents/:id", requireLocalUser, writeRateLimit, async (req, res): Promise<any> => {
-  const user = (req as any).localUser as PublicLocalUser;
-  const storagePath = await deleteCourseDocument(user.uid, req.params.id);
-  if (storagePath) {
-    try { fs.rmSync(documentPathFromStoragePath(storagePath), { force: true }); } catch (error) {}
-  }
-  return res.json({ ok: true });
-});
-
-app.get("/api/library/search", requireLocalUser, async (req, res): Promise<any> => {
-  const user = (req as any).localUser as PublicLocalUser;
-  const folderId = normalizeText(req.query.folderId, 160);
-  const query = normalizeText(req.query.query, 500);
-  if (!folderId || !query) return res.status(400).json({ error: "Selecciona un curso y escribe una consulta." });
-  return res.json({ results: await searchCourseMaterial(user.uid, folderId, query) });
-});
-
-app.get("/api/folders/:id/ai-permission", requireLocalUser, async (req, res): Promise<any> => {
-  const user = (req as any).localUser as PublicLocalUser;
-  return res.json({ enabled: await getFolderAiPermission(user.uid, req.params.id) });
-});
-
-app.put("/api/folders/:id/ai-permission", requireLocalUser, writeRateLimit, async (req, res): Promise<any> => {
-  try {
-    const user = (req as any).localUser as PublicLocalUser;
-    await setFolderAiPermission(user.uid, req.params.id, !!req.body?.enabled);
-    return res.json({ ok: true, enabled: !!req.body?.enabled });
-  } catch (error: any) {
-    return res.status(400).json({ error: error.message || "No se pudo guardar el permiso de IA." });
-  }
-});
-
-app.post("/api/library/answer", requireLocalUser, aiRateLimit, async (req, res): Promise<any> => {
-  try {
-    const user = (req as any).localUser as PublicLocalUser;
-    const folderId = normalizeText(req.body?.folderId, 160);
-    const query = normalizeText(req.body?.query, 500);
-    if (!folderId || !query) return res.status(400).json({ error: "Selecciona un curso y escribe una pregunta." });
-    if (!await getFolderAiPermission(user.uid, folderId)) {
-      return res.status(403).json({ error: "Activa el permiso de IA para este curso antes de consumir Gemini." });
-    }
-    const sources = await searchCourseMaterial(user.uid, folderId, query);
-    if (!sources.length) return res.status(404).json({ error: "No encontre evidencia local en los PDFs o reuniones de este curso." });
-    const resolvedApiKey = await resolveUserGeminiApiKey(req);
-    const sourceText = sources.slice(0, 6).map((source, index) => {
-      const reference = source.source === "pdf" ? `PDF: ${source.title}, pagina ${source.pageNumber}` : `Reunion: ${source.title}`;
-      return `[${index + 1}] ${reference}\n${source.excerpt}`;
-    }).join("\n\n");
-    const ai = new GoogleGenAI({ apiKey: resolvedApiKey });
-    const response = await ai.models.generateContent({
-      model: "gemini-3.5-flash",
-      contents: `Pregunta: ${query}\n\nFuentes locales:\n${sourceText}`,
-      config: {
-        systemInstruction: "Responde en espanol de forma breve usando exclusivamente las fuentes locales entregadas. No inventes datos. Incluye referencias [1], [2] cuando uses una fuente.",
-      },
-    });
-    return res.json({ answer: response.text || "No se pudo generar una respuesta.", sources });
-  } catch (error: any) {
-    return res.status(500).json({ error: toFriendlyGeminiError(error) || "No se pudo analizar la biblioteca." });
-  }
-});
 app.get("/api/settings", requireLocalUser, async (req, res): Promise<any> => {
   const user = (req as any).localUser as PublicLocalUser;
   return res.json({ settings: await getSettings(user.uid) });
@@ -689,11 +541,11 @@ Analyze the audio file provided and generate the response in the language spoken
 CRITICAL: If the language of the audio is Spanish, the 'title', 'transcript', and 'summary' MUST be generated entirely in Spanish. Do NOT translate Spanish speech or summaries into English. Default to Spanish when in doubt.
 
 Specifically, generate:
-1. Exact verbatim transcript in the native spoken language. EVERY sentence or speaker change MUST begin with a precise, chronological timestamp indicating exactly when it is spoken in the format '[MM:SS] Speaker: ...' (e.g., "[00:04] Speaker 1: Hola...", "[00:15] Speaker 2: SÃ­, claro..."). Detail the turns meticulously and timeline everything precisely.
+1. Exact verbatim transcript in the native spoken language. EVERY sentence or speaker change MUST begin with a precise, chronological timestamp indicating exactly when it is spoken in the format '[MM:SS] Speaker: ...' (e.g., "[00:04] Speaker 1: Hola...", "[00:15] Speaker 2: Sí, claro..."). Detail the turns meticulously and timeline everything precisely.
 2. Obsidian-style summary in the native spoken language, featuring chapters with duration timestamps, clean outlines, and bulleted checklist tasks like [ ] or [x] for clear action items.
 3. A short, creative title in the native spoken language summarizing the conversation.`;
 
-    let userPrompt = normalizeText(promptOverride, 20_000) || "Realiza una transcripciÃ³n precisa de este audio y presenta notas estructuradas en el mismo idioma en que se habla.";
+    let userPrompt = normalizeText(promptOverride, 20_000) || "Realiza una transcripción precisa de este audio y presenta notas estructuradas en el mismo idioma en que se habla.";
     if (liveDraft.length > 0) {
       userPrompt += `\n\nReference Live Speech Draft for context and text correction:\n"""\n${liveDraft}\n"""\nUse the above draft to correct spelling of names or terms, alignment, and format the official transcription with precise timestamps from the audio file.`;
     }
@@ -760,7 +612,7 @@ app.post("/api/summarize-text", requireLocalUser, aiRateLimit, async (req, res):
     const transcript = normalizeText(req.body?.transcript, MAX_AI_TEXT_CHARS);
 
     if (!transcript) {
-      return res.status(400).json({ error: "No se proporcionÃ³ texto de transcripciÃ³n para resumir." });
+      return res.status(400).json({ error: "No se proporcionó texto de transcripción para resumir." });
     }
 
     const resolvedApiKey = await resolveUserGeminiApiKey(req);
@@ -783,7 +635,7 @@ Specifically, generate:
 
     const response = await ai.models.generateContent({
       model: "gemini-3.5-flash",
-      contents: `Por favor resume la siguiente transcripciÃ³n en espaÃ±ol:\n\n${transcript}`,
+      contents: `Por favor resume la siguiente transcripción en español:\n\n${transcript}`,
       config: {
         systemInstruction: systemPrompt,
         responseMimeType: "application/json",
@@ -831,10 +683,10 @@ app.post("/api/chat", requireLocalUser, aiRateLimit, async (req, res): Promise<a
     const rawMessages = Array.isArray(req.body?.messages) ? req.body.messages : [];
 
     if (!transcript) {
-      return res.status(400).json({ error: "No se proporcionÃ³ contexto de transcripciÃ³n para chatear." });
+      return res.status(400).json({ error: "No se proporcionó contexto de transcripción para chatear." });
     }
     if (!userMessage) {
-      return res.status(400).json({ error: "No se proporcionÃ³ un mensaje del usuario." });
+      return res.status(400).json({ error: "No se proporcionó un mensaje del usuario." });
     }
 
     const resolvedApiKey = await resolveUserGeminiApiKey(req);
@@ -901,14 +753,14 @@ ${transcript}
   }
 });
 
-// Enviar reporte PDF y minuta por correo electrÃ³nico
+// Enviar reporte PDF y minuta por correo electrónico
 app.post("/api/send-email", requireLocalUser, emailRateLimit, async (req, res): Promise<any> => {
   try {
     validateJsonPayloadSize(req, 12 * 1024 * 1024);
     const { to, subject, body, pdfBase64, pdfFilename, title } = req.body;
 
     if (!isValidEmail(to)) {
-      return res.status(400).json({ error: "Falta el destinatario (correo electrÃ³nico)" });
+      return res.status(400).json({ error: "Falta el destinatario (correo electrónico)" });
     }
 
     const useSmtp = !!(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
@@ -954,26 +806,26 @@ app.post("/api/send-email", requireLocalUser, emailRateLimit, async (req, res): 
             <p style="color: #64748b; margin: 4px 0 0 0; font-size: 14px;">Actas de reunion y transcripcion inteligente</p>
           </div>
           
-          <p style="font-size: 15px; color: #334155; line-height: 1.6; margin-top: 0;">Â¡Hola!</p>
+          <p style="font-size: 15px; color: #334155; line-height: 1.6; margin-top: 0;">¡Hola!</p>
           <p style="font-size: 15px; color: #334155; line-height: 1.6;">
-            Te han enviado el reporte PDF, la transcripciÃ³n y el resumen inteligente de la sesiÃ³n titulada <strong>"${meetingTitle}"</strong>. Puedes encontrar el archivo PDF oficial adjunto en este correo.
+            Te han enviado el reporte PDF, la transcripción y el resumen inteligente de la sesión titulada <strong>"${meetingTitle}"</strong>. Puedes encontrar el archivo PDF oficial adjunto en este correo.
           </p>
           
           <div style="background-color: #f8fafc; padding: 18px; border-radius: 12px; border: 1px solid #f1f5f9; margin: 24px 0;">
-            <p style="margin: 0 0 8px 0; font-size: 11px; text-transform: uppercase; font-weight: 800; color: #64748b; letter-spacing: 0.05em;">Notas u observaciones de quien envÃ­a:</p>
+            <p style="margin: 0 0 8px 0; font-size: 11px; text-transform: uppercase; font-weight: 800; color: #64748b; letter-spacing: 0.05em;">Notas u observaciones de quien envía:</p>
             <p style="margin: 0; font-size: 14px; color: #0f172a; font-style: italic; line-height: 1.5;">
               "${safeHtmlBody || 'No se incluyeron notas adicionales.'}"
             </p>
           </div>
           
           <div style="border-top: 1px solid #f1f5f9; padding-top: 20px; margin-top: 24px; text-align: center;">
-            <p style="font-size: 13px; color: #64748b; margin: 0 0 4px 0;">Â¿Deseas procesar mÃ¡s reuniones de hasta 3 horas sin lÃ­mites de tamaÃ±o?</p>
+            <p style="font-size: 13px; color: #64748b; margin: 0 0 4px 0;">¿Deseas procesar más reuniones de hasta 3 horas sin límites de tamaño?</p>
             <p style="font-size: 13px; color: #0f172a; font-weight: 600; margin: 0;">Ejecuta Olli localmente o en tu propio servidor.</p>
           </div>
           
           <footer style="margin-top: 40px; border-top: 1px solid #e2e8f0; padding-top: 16px; text-align: center; font-size: 11px; color: #94a3b8; line-height: 1.5;">
             Enviado desde Olli local.<br/>
-            Para usar un servidor de correo corporativo real, configura tus variables SMTP en la configuraciÃ³n de entorno o de AI Studio secrets.
+            Para usar un servidor de correo corporativo real, configura tus variables SMTP en la configuración de entorno o de AI Studio secrets.
           </footer>
         </div>
       `,

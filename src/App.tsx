@@ -10,10 +10,9 @@ import Sidebar from "./components/Sidebar";
 import Dashboard from "./components/Dashboard";
 import AudioRecorder from "./components/AudioRecorder";
 import MeetingViewer from "./components/MeetingViewer";
-import LibraryPanel from "./components/LibraryPanel";
 import SettingsPanel from "./components/SettingsPanel";
 import OnboardingScreen from "./components/OnboardingScreen";
-import { BookOpen, Brain, Menu, X, LayoutDashboard, Mic, FolderOpen, Settings, LogOut } from "lucide-react";
+import { Brain, Menu, X, LayoutDashboard, Mic, FolderOpen, Settings, LogOut } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import {
   fetchUserMeetings,
@@ -98,7 +97,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
 
   // Active workspace page
-  const [activeTab, setActiveTab] = useState<"dashboard" | "recorder" | "meetings" | "library" | "settings">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "recorder" | "meetings" | "settings">("dashboard");
   const [preselectedRecorderMode, setPreselectedRecorderMode] = useState<"record" | "upload">("record");
 
   // Meetings and Settings state
@@ -539,7 +538,6 @@ export default function App() {
                   { id: "dashboard" as const, label: "Home", icon: LayoutDashboard },
                   { id: "recorder" as const, label: "Olli AI Chat", icon: Mic },
                   { id: "meetings" as const, label: "Explore", icon: FolderOpen },
-                  { id: "library" as const, label: "Biblioteca", icon: BookOpen },
                   { id: "settings" as const, label: "Settings", icon: Settings },
                 ].map((item) => {
                   const Icon = item.icon;
@@ -625,15 +623,6 @@ export default function App() {
                 />
               )}
 
-              {activeTab === "library" && user && (
-                <LibraryPanel
-                  userId={user.uid}
-                  folders={meetingFolders}
-                  meetings={meetings}
-                  hasApiKey={settings.hasApiKey}
-                  onCreateFolder={handleCreateMeetingFolder}
-                />
-              )}
               {activeTab === "settings" && (
                 <SettingsPanel
                   settings={settings}
