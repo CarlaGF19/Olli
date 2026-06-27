@@ -7,7 +7,7 @@ type WorkerRequest =
   | { id: number; type: "transcribe"; audio: Float32Array };
 
 const ctx: DedicatedWorkerGlobalScope = self as any;
-const MODEL_ID = "Xenova/whisper-base";
+const MODEL_ID = "Xenova/whisper-small";
 
 env.allowLocalModels = false;
 env.useBrowserCache = true;
@@ -47,10 +47,10 @@ ctx.onmessage = async (event: MessageEvent<WorkerRequest>) => {
       language: "spanish",
       task: "transcribe",
       chunk_length_s: 30,
-      stride_length_s: 2,
-      max_new_tokens: 96,
-      no_repeat_ngram_size: 5,
-      repetition_penalty: 1.2,
+      stride_length_s: 5,
+      max_new_tokens: 160,
+      no_repeat_ngram_size: 4,
+      repetition_penalty: 1.05,
       temperature: 0,
     });
 

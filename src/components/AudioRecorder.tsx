@@ -21,6 +21,14 @@ interface AudioRecorderProps {
 const MAX_RECORDING_SECONDS = 2 * 60 * 60;
 const RECORDING_WARNING_SECONDS = MAX_RECORDING_SECONDS - 10 * 60;
 const MAX_DIGITAL_PCM_BUFFER_SECONDS = 60;
+const DIGITAL_FLUSH_INTERVAL_MS = 24_000;
+const DIGITAL_FORCE_MIN_SECONDS = 4;
+const DIGITAL_LIVE_MIN_SECONDS = 18;
+const DIGITAL_LOW_RMS = 0.004;
+const DIGITAL_GOOD_RMS = 0.012;
+const DIGITAL_LOW_PEAK = 0.018;
+const DIGITAL_GOOD_PEAK = 0.05;
+const DIGITAL_TRANSCRIPT_OVERLAP_SECONDS = 4;
 
 export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpdateDraft, initialMode }: AudioRecorderProps) {
   // Tabs: "record" or "upload"
@@ -63,6 +71,11 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
   const [isDigitalLiveTranscribing, setIsDigitalLiveTranscribing] = useState(false);
   const [digitalLiveEnabled, setDigitalLiveEnabled] = useState(false);
   const [digitalAudioDebug, setDigitalAudioDebug] = useState("");
+  const [apiPreciseTranscription, setApiPreciseTranscription] = useState(true);
+  const [digitalSignalState, setDigitalSignalState] = useState("Esperando senal");
+  const [digitalSegmentCount, setDigitalSegmentCount] = useState(0);
+  const [digitalVoiceSeconds, setDigitalVoiceSeconds] = useState(0);
+  const [digitalSilentSeconds, setDigitalSilentSeconds] = useState(0);
 
   // Live Copilot chat states
   const [isCopilotActive, setIsCopilotActive] = useState(false);
@@ -268,6 +281,11 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
   const digitalLiveBusyRef = useRef(false);
   const digitalLiveEnabledRef = useRef(false);
   const digitalLiveOverflowNotifiedRef = useRef(false);
+  const apiPreciseTranscriptionRef = useRef(true);
+  const digitalEmptySegmentCountRef = useRef(0);
+  const digitalSegmentCountRef = useRef(0);
+  const digitalVoiceSecondsRef = useRef(0);
+  const digitalSilentSecondsRef = useRef(0);
 
   const durationRef = useRef(0);
   const warningNotificationSentRef = useRef(false);
@@ -281,6 +299,10 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
   useEffect(() => {
     digitalLiveEnabledRef.current = digitalLiveEnabled;
   }, [digitalLiveEnabled]);
+
+  useEffect(() => {
+    apiPreciseTranscriptionRef.current = apiPreciseTranscription;
+  }, [apiPreciseTranscription]);
 
   useEffect(() => {
     stopRecordingRef.current = stopRecording;
@@ -325,6 +347,14 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
     digitalLivePeakRef.current = 0;
     digitalLiveDebugLastUpdateRef.current = 0;
     setDigitalAudioDebug("");
+    setDigitalSignalState("Esperando senal");
+    setDigitalSegmentCount(0);
+    setDigitalVoiceSeconds(0);
+    setDigitalSilentSeconds(0);
+    digitalEmptySegmentCountRef.current = 0;
+    digitalSegmentCountRef.current = 0;
+    digitalVoiceSecondsRef.current = 0;
+    digitalSilentSecondsRef.current = 0;
     digitalLiveBusyRef.current = false;
     digitalLiveLastFlushRef.current = 0;
     if (digitalLiveProcessorRef.current) {
@@ -379,24 +409,31 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
     }
   };
 
+  const pushLiveDraftSnapshot = (durationSeconds = durationRef.current) => {
+    if (!onUpdateDraft || !currentDraftIdRef.current) return;
+
+    const m = Math.floor(durationSeconds / 60);
+    const s = durationSeconds % 60;
+    const liveDurationFormatted = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+
+    setIsSyncingDraft(true);
+    onUpdateDraft({
+      id: currentDraftIdRef.current,
+      title: `Borrador en Vivo: ${new Date().toLocaleDateString()} a las ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+      transcript: liveTranscriptRef.current || "(Silencio grabado...)",
+      summary: "Borrador guardado en tiempo real. Si el procesamiento final falla, este texto queda como respaldo local.",
+      duration: liveDurationFormatted,
+      isDraft: true,
+      date: new Date().toISOString(),
+    });
+    window.setTimeout(() => {
+      setIsSyncingDraft(false);
+    }, 500);
+  };
+
   const syncDraftTick = (next: number) => {
-    if (next % 1200 === 0 && onUpdateDraft && currentDraftIdRef.current) {
-      setIsSyncingDraft(true);
-      const m = Math.floor(next / 60);
-      const s = next % 60;
-      const liveDurationFormatted = `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-      onUpdateDraft({
-        id: currentDraftIdRef.current,
-        title: `Borrador en Vivo: ${new Date().toLocaleDateString()} a las ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
-        transcript: liveTranscriptRef.current || "(Silencio grabado...)",
-        summary: "### Borrador Guardado en Tiempo Real\n\nEste es un borrador auto-guardado mientras hablabas. Si la transcripción del audio pesado falla, puedes usar la opción de IA para resumir este borrador de texto directamente en tu bóveda.",
-        duration: liveDurationFormatted,
-        isDraft: true,
-        date: new Date().toISOString()
-      });
-      setTimeout(() => {
-        setIsSyncingDraft(false);
-      }, 800);
+    if (next % 300 === 0) {
+      pushLiveDraftSnapshot(next);
     }
   };
 
@@ -448,7 +485,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
     });
   };
 
-  const consumeDigitalPcmBuffer = () => {
+  const consumeDigitalPcmBuffer = (keepOverlap = true) => {
     const chunks = digitalLivePcmChunksRef.current.splice(0);
     const totalSamples = digitalLivePcmSampleCountRef.current;
     digitalLivePcmSampleCountRef.current = 0;
@@ -460,23 +497,61 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
       offset += chunk.length;
     });
 
+    if (keepOverlap && totalSamples > 0) {
+      const overlapSamples = Math.min(
+        totalSamples,
+        Math.round(digitalLiveSampleRateRef.current * DIGITAL_TRANSCRIPT_OVERLAP_SECONDS)
+      );
+      const overlap = merged.slice(totalSamples - overlapSamples);
+      digitalLivePcmChunksRef.current = [overlap];
+      digitalLivePcmSampleCountRef.current = overlap.length;
+    }
+
     return merged;
   };
 
   const getPcmStats = (audio: Float32Array) => {
     let sumSquares = 0;
     let peak = 0;
+    let activeSamples = 0;
 
     for (let i = 0; i < audio.length; i += 1) {
       const value = Math.abs(audio[i]);
       sumSquares += audio[i] * audio[i];
       if (value > peak) peak = value;
+      if (value > 0.01) activeSamples += 1;
     }
 
     return {
       rms: Math.sqrt(sumSquares / Math.max(1, audio.length)),
       peak,
+      voiceRatio: activeSamples / Math.max(1, audio.length),
     };
+  };
+
+  const classifyPcmSignal = (stats: { rms: number; peak: number; voiceRatio: number }) => {
+    if (stats.rms < DIGITAL_LOW_RMS || stats.peak < DIGITAL_LOW_PEAK || stats.voiceRatio < 0.015) {
+      return "Senal baja o silencio";
+    }
+    if (stats.rms >= DIGITAL_GOOD_RMS || stats.peak >= DIGITAL_GOOD_PEAK || stats.voiceRatio >= 0.08) {
+      return "Voz clara detectada";
+    }
+    return "Voz detectada";
+  };
+
+  const rememberDigitalSignalStats = (stats: { rms: number; peak: number; voiceRatio: number }, seconds: number) => {
+    const signalState = classifyPcmSignal(stats);
+    setDigitalSignalState(signalState);
+
+    if (signalState === "Senal baja o silencio") {
+      digitalSilentSecondsRef.current += seconds;
+      setDigitalSilentSeconds(Math.round(digitalSilentSecondsRef.current));
+      return false;
+    }
+
+    digitalVoiceSecondsRef.current += seconds;
+    setDigitalVoiceSeconds(Math.round(digitalVoiceSecondsRef.current));
+    return true;
   };
 
   const looksLikeWhisperLoop = (text: string) => {
@@ -501,12 +576,17 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
   };
 
   const cleanWhisperSegment = (text: string) => {
-    const cleaned = text.replace(/\s+/g, " ").trim();
+    const cleaned = text
+      .replace(/\[(?:m[uú]sica|music|audio|sonido|silencio)\]/gi, "")
+      .replace(/[♪♫]+/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
     if (!cleaned) return "";
     if (looksLikeWhisperLoop(cleaned)) return "";
 
     const words = cleaned.split(/\s+/).filter(Boolean);
-    if (words.length > 120) return "";
+    if (words.length < 2) return "";
+    if (words.length > 180) return "";
 
     return cleaned;
   };
@@ -515,8 +595,8 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
     const previous = liveTranscriptRef.current.trim();
     if (!previous) return segment;
 
-    const previousWords = previous.split(/\s+/);
-    const segmentWords = segment.split(/\s+/);
+    const previousWords = previous.replace(/\[\d{2}:\d{2}(?:\s*-\s*\d{2}:\d{2})?\]/g, "").split(/\s+/).filter(Boolean);
+    const segmentWords = segment.split(/\s+/).filter(Boolean);
     const maxOverlap = Math.min(14, previousWords.length, segmentWords.length);
 
     for (let overlap = maxOverlap; overlap >= 4; overlap -= 1) {
@@ -550,24 +630,26 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
     if (digitalLivePcmSampleCountRef.current === 0) return;
 
     const now = Date.now();
-    if (!force && now - digitalLiveLastFlushRef.current < 8000) return;
+    if (!force && now - digitalLiveLastFlushRef.current < DIGITAL_FLUSH_INTERVAL_MS) return;
 
-      const audio = consumeDigitalPcmBuffer();
+      const audio = consumeDigitalPcmBuffer(!force);
       digitalLiveLastFlushRef.current = now;
       digitalLiveBusyRef.current = true;
       setIsDigitalLiveTranscribing(true);
       setSpeechErrorNotice(null);
 
       try {
-      const minSamples = Math.round(digitalLiveSampleRateRef.current * (force ? 3 : 6));
+      const minSamples = Math.round(digitalLiveSampleRateRef.current * (force ? DIGITAL_FORCE_MIN_SECONDS : DIGITAL_LIVE_MIN_SECONDS));
       if (audio.length < minSamples) {
         digitalLiveBusyRef.current = false;
         setIsDigitalLiveTranscribing(false);
         return;
       }
       const stats = getPcmStats(audio);
-      if (stats.rms < 0.006 || stats.peak < 0.025) {
-        setDigitalAudioDebug("Audio muy bajo para transcribir · sube volumen de la pestana");
+      const audioSeconds = audio.length / Math.max(1, digitalLiveSampleRateRef.current);
+      const hasUsableVoice = rememberDigitalSignalStats(stats, audioSeconds);
+      if (!hasUsableVoice) {
+        setDigitalAudioDebug("Senal baja: sube el volumen de la pestana o verifica que compartiste audio");
         return;
       }
 
@@ -577,15 +659,25 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
       );
       const transcript = cleanWhisperSegment(await transcribePcmInBrowser(audio, digitalLiveSampleRateRef.current));
       if (transcript) {
+        digitalEmptySegmentCountRef.current = 0;
         const segment = appendTranscriptSegment(transcript);
         if (!segment.trim()) return;
-        const marker = `[${formatTranscriptTimestamp(segmentStartedAt)}]`;
+        const segmentEndedAt = segmentStartedAt + audioSeconds;
+        const marker = `[${formatTranscriptTimestamp(segmentStartedAt)} - ${formatTranscriptTimestamp(segmentEndedAt)}]`;
         const nextText = `${liveTranscriptRef.current ? `${liveTranscriptRef.current.trim()}\n` : ""}${marker} ${segment}`.trim();
         liveTranscriptRef.current = `${nextText} `;
         setLiveTranscript(liveTranscriptRef.current);
         setDraftWordCount(nextText.split(/\s+/).filter(Boolean).length);
+        digitalSegmentCountRef.current += 1;
+        setDigitalSegmentCount(digitalSegmentCountRef.current);
+        setDigitalAudioDebug(`Segmento ${digitalSegmentCountRef.current} guardado - ${classifyPcmSignal(stats)} - modo preciso`);
+        pushLiveDraftSnapshot(durationRef.current);
       } else {
-        setDigitalAudioDebug("Segmento descartado por repeticion o ruido");
+        digitalEmptySegmentCountRef.current += 1;
+        setDigitalAudioDebug(`Voz detectada, sin texto util (${digitalEmptySegmentCountRef.current})`);
+        if (digitalEmptySegmentCountRef.current >= 3) {
+          setSpeechErrorNotice("Hay audio detectable, pero Whisper no esta generando texto util. Revisa idioma, ruido de fondo o volumen de la pestana.");
+        }
       }
     } catch (error: any) {
       const message = error.message || "No se pudo transcribir el audio digital con Whisper local.";
@@ -615,6 +707,14 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
       digitalLivePcmSampleCountRef.current = 0;
       digitalLivePeakRef.current = 0;
       digitalLiveDebugLastUpdateRef.current = 0;
+      digitalEmptySegmentCountRef.current = 0;
+      digitalSegmentCountRef.current = 0;
+      digitalVoiceSecondsRef.current = 0;
+      digitalSilentSecondsRef.current = 0;
+      setDigitalSegmentCount(0);
+      setDigitalVoiceSeconds(0);
+      setDigitalSilentSeconds(0);
+      setDigitalSignalState("Esperando senal");
       setDigitalAudioDebug("Whisper listo. Esperando audio de la pestana...");
       digitalLiveLastFlushRef.current = 0;
     } else {
@@ -673,8 +773,9 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
           if (now - digitalLiveDebugLastUpdateRef.current > 1000) {
             digitalLiveDebugLastUpdateRef.current = now;
             const seconds = digitalLivePcmSampleCountRef.current / digitalLiveSampleRateRef.current;
-            const signal = peak > 0.01 ? "senal detectada" : "sin senal audible";
-            setDigitalAudioDebug(`${seconds.toFixed(1)}s PCM capturados · ${signal}`);
+            const signal = peak > DIGITAL_LOW_PEAK ? "senal detectada" : "sin senal audible";
+            setDigitalSignalState(signal === "senal detectada" ? "Capturando audio" : "Esperando senal");
+            setDigitalAudioDebug(`${seconds.toFixed(1)}s PCM capturados - ${signal}`);
             digitalLivePeakRef.current = 0;
           }
 
@@ -761,6 +862,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
     setDraftWordCount(0);
     setFailedSessionData(null);
     audioChunksRef.current = [];
+    apiPreciseTranscriptionRef.current = apiPreciseTranscription;
     setIsDigitalLiveTranscribing(false);
 
     // Initialize the live draft session
@@ -780,6 +882,22 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
 
     try {
       await requestDesktopNotificationPermission();
+
+      if (captureSource === "screen" && apiPreciseTranscriptionRef.current) {
+        if (!settings.hasApiKey) {
+          setSpeechErrorNotice("API precisa desactivada: configura tu Gemini API Key en Settings para mejorar la transcripcion al terminar.");
+          apiPreciseTranscriptionRef.current = false;
+          setApiPreciseTranscription(false);
+        } else {
+          const allowed = window.confirm(
+            "Olli usara tu API de Gemini para mejorar la transcripcion al terminar. Esto consume cuota y enviara el audio capturado solo a tu backend local. Autorizar para esta sesion?"
+          );
+          if (!allowed) {
+            apiPreciseTranscriptionRef.current = false;
+            setApiPreciseTranscription(false);
+          }
+        }
+      }
 
       let stream: MediaStream;
       if (captureSource === "screen") {
@@ -848,7 +966,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
         await warmupBrowserWhisper();
         digitalLiveEnabledRef.current = true;
         setDigitalLiveEnabled(true);
-        setDigitalAudioDebug("Whisper listo. La transcripción local se guardará con marcas de tiempo.");
+        setDigitalAudioDebug("Whisper listo. La transcripcion local se guardara con marcas de tiempo.");
         setSpeechErrorNotice(null);
       }
       // Instantiate HTML MediaRecorder (optimized bitrate for voice recording)
@@ -861,7 +979,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
       }
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0 && captureSourceRef.current !== "screen") {
+        if (event.data.size > 0 && (captureSourceRef.current !== "screen" || apiPreciseTranscriptionRef.current)) {
           audioChunksRef.current.push(event.data);
         }
       };
@@ -878,9 +996,14 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
           const dur = durationRef.current || 0;
 
           if (captureSourceRef.current === "screen") {
+            if (apiPreciseTranscriptionRef.current && settings.hasApiKey && audioBlob.size > 0) {
+              await handleAudioProcess(audioBlob, dur, finalTranscript, true);
+              return;
+            }
+
             if (!finalTranscript) {
               setErrorMessage(
-                "No se detectó voz transcribible en el audio compartido. No se guardó una transcripción vacía: confirma que compartiste el audio de la pestaña y vuelve a intentarlo."
+                "No se detecto voz transcribible en el audio compartido. No se guardo una transcripcion vacia: confirma que compartiste el audio de la pestana y vuelve a intentarlo."
               );
               return;
             }
@@ -889,7 +1012,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
               id: currentDraftIdRef.current || undefined,
               title: `Borrador en vivo - ${new Date().toLocaleDateString("es-CO")}`,
               transcript: finalTranscript,
-              summary: "Transcripción local capturada con Whisper. Puedes analizarla con IA desde Explore cuando lo necesites.",
+              summary: "Transcripcion local capturada con Whisper. Puedes analizarla con IA desde Explore cuando lo necesites.",
             }, dur);
           } else if (!finalTranscript) {
             console.log("Missing microphone transcript. Using server-side Gemini audio transcription as fallback.");
@@ -1142,7 +1265,12 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
   };
 
   // 3. Audio Transcribing Proxy API Request Handler
-  const handleAudioProcess = async (blob: Blob, durationSec: number) => {
+  const handleAudioProcess = async (
+    blob: Blob,
+    durationSec: number,
+    liveDraftOverride = liveTranscriptRef.current.trim(),
+    forceAudioTranscription = false
+  ) => {
     setIsProcessing(true);
     setProcessingStatus("Preparando canales de audio...");
 
@@ -1167,14 +1295,15 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
 
       // 2. Call local `/api/transcribe` backend endpoint (always server-side to adhere to security rules and prevent client browser CORS/shield blockages)
       let json;
-      setProcessingStatus("Transcribiendo y analizando con Gemini AI...");
+      setProcessingStatus(forceAudioTranscription ? "Transcribiendo con API precisa de Gemini..." : "Transcribiendo y analizando con Gemini AI...");
       const response = await fetch("/api/transcribe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           audio: base64Data,
           mimeType: blob.type || "audio/webm",
-          liveDraftText: liveTranscript,
+          liveDraftText: liveDraftOverride,
+          forceAudioTranscription,
         }),
       });
 
@@ -1207,7 +1336,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
         throw new Error(`El servidor respondió con código exitoso 200, pero la respuesta no es un JSON válido. Respuesta: ${rawText.substring(0, 120)}...`);
       }
 
-      setProcessingStatus("Generando resumen ejecutivo y plan de acción...");
+      setProcessingStatus(forceAudioTranscription ? "Guardando transcripcion precisa..." : "Generando resumen ejecutivo y plan de accion...");
       onTranscriptionSuccess({
         ...json,
         id: currentDraftIdRef.current || undefined
@@ -1727,6 +1856,30 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
                     
                     <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-4 mb-5">
                       {captureSource === "screen" ? (
+                        <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50/70 p-3">
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <p className="text-xs font-black text-slate-900">API precisa al terminar</p>
+                              <p className="text-[11px] text-slate-500 leading-relaxed mt-1">
+                                Usa Gemini para mejorar la transcripcion final. Consume cuota y mantiene Whisper local como respaldo.
+                              </p>
+                              {!settings.hasApiKey && (
+                                <p className="text-[10px] font-bold text-amber-700 mt-2">Configura tu API Key en Settings para activarlo.</p>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setApiPreciseTranscription((value) => !value)}
+                              disabled={!settings.hasApiKey}
+                              className={`w-12 h-6 rounded-full p-0.5 transition-colors shrink-0 ${apiPreciseTranscription && settings.hasApiKey ? "bg-[#135bf1]" : "bg-slate-200"} disabled:opacity-50`}
+                              title="Autorizar transcripcion precisa con API al terminar"
+                            >
+                              <span className={`block w-5 h-5 rounded-full bg-white shadow transition-transform ${apiPreciseTranscription && settings.hasApiKey ? "translate-x-6" : "translate-x-0"}`} />
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+                      {captureSource === "screen" ? (
                         <div className="flex items-center justify-between gap-4">
                           <div>
                             <p className="text-xs font-black text-slate-900">Transcripción local en vivo</p>
@@ -1897,7 +2050,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
                             <div className="flex items-center gap-2">
                               {digitalAudioDebug && (
                                 <span className="hidden sm:inline text-[9px] font-bold text-slate-400">
-                                  {digitalAudioDebug}
+                                  {digitalSignalState} - {digitalAudioDebug}
                                 </span>
                               )}
                               <button
@@ -1947,7 +2100,7 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
                                 Canal de audio directo
                               </p>
                               <span className="text-[9px] font-bold text-slate-500 bg-slate-50 border border-slate-100 px-2 py-1 rounded-lg">
-                                {captureSource === "screen" ? "Audio digital" : "Microfono"}
+                                {captureSource === "screen" ? `Audio digital - ${digitalSegmentCount} bloques` : "Microfono"}
                               </span>
                             </div>
                             
@@ -1960,9 +2113,14 @@ export default function AudioRecorder({ onTranscriptionSuccess, settings, onUpda
                               )}
                               {captureSource === "screen" && visibleLiveTranscript ? (
                                 <div className="space-y-2 bg-transparent pr-1">
-                                  <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-emerald-50 border border-emerald-100 rounded-lg text-[9.5px] font-bold text-emerald-700 uppercase tracking-wider mb-2">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                    <span>Transcripcion local en vivo</span>
+                                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                                    <div className="inline-flex items-center gap-1.5 px-2 py-1 bg-emerald-50 border border-emerald-100 rounded-lg text-[9.5px] font-bold text-emerald-700 uppercase tracking-wider">
+                                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                      <span>Transcripcion local en vivo</span>
+                                    </div>
+                                    <span className="text-[9px] font-bold text-slate-500 bg-slate-50 border border-slate-100 px-2 py-1 rounded-lg">
+                                      Voz {formatTimer(digitalVoiceSeconds)} - silencio {formatTimer(digitalSilentSeconds)}
+                                    </span>
                                   </div>
                                   <div className="text-slate-800 font-normal whitespace-pre-wrap text-justify [text-wrap:pretty]">{visibleLiveTranscript}</div>
                                 </div>

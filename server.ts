@@ -497,14 +497,15 @@ app.delete("/api/account", requireLocalUser, accountDeletionRateLimit, async (re
 // Transcribe and analyze audio
 app.post("/api/transcribe", requireLocalUser, transcribeRateLimit, async (req, res): Promise<any> => {
   try {
-    const { audio, mimeType, promptOverride, liveDraftText } = req.body;
+    const { audio, mimeType, promptOverride, liveDraftText, forceAudioTranscription } = req.body;
     const liveDraft = normalizeText(liveDraftText, MAX_AI_TEXT_CHARS);
+    const shouldForceAudioTranscription = forceAudioTranscription === true;
 
     if (!audio) {
       return res.status(400).json({ error: "Missing audio data in base64 format." });
     }
 
-    if (liveDraft.length > 0) {
+    if (liveDraft.length > 0 && !shouldForceAudioTranscription) {
       try {
         const resolvedApiKey = await resolveUserGeminiApiKey(req);
         const ai = new GoogleGenAI({
@@ -581,18 +582,27 @@ app.post("/api/transcribe", requireLocalUser, transcribeRateLimit, async (req, r
 
     const cleanBase64 = cleanBase64Payload(audio, MAX_AUDIO_BASE64_BYTES);
 
-    const systemPrompt = `You are Olli, an elite AI tool designed to transcribe recordings and output gorgeous Notion & Obsidian styled meeting summaries.
-Analyze the audio file provided and generate the response in the language spoken in the audio.
-CRITICAL: If the language of the audio is Spanish, the 'title', 'transcript', and 'summary' MUST be generated entirely in Spanish. Do NOT translate Spanish speech or summaries into English. Default to Spanish when in doubt.
+    const systemPrompt = `You are Olli, a precise academic audio transcription system.
+Analyze the audio file and generate the response in the language spoken in the audio.
+CRITICAL: If the language is Spanish, title, transcript, and summary MUST be entirely in Spanish. Do not translate.
 
-Specifically, generate:
-1. Exact verbatim transcript in the native spoken language. EVERY sentence or speaker change MUST begin with a precise, chronological timestamp indicating exactly when it is spoken in the format '[MM:SS] Speaker: ...' (e.g., "[00:04] Speaker 1: Hola...", "[00:15] Speaker 2: Sí, claro..."). Detail the turns meticulously and timeline everything precisely.
-2. A factual academic summary in plain text, based only on the spoken audio. Do not invent details. Do not use Markdown, emojis, decorative separators, or speaker labels.
-3. A short, creative title in the native spoken language summarizing the conversation.`;
+Rules:
+1. Produce a literal transcript. Do not summarize inside the transcript.
+2. Add chronological timestamps in [MM:SS] format at natural paragraph breaks.
+3. Do not invent speaker names or labels. If a word is unclear, write [inaudible].
+4. Preserve the meaning of the spoken audio even if the reference draft has mistakes.
+5. Summary must be factual, academic, plain text, and based only on the audio. No Markdown, emojis, decorative separators, or invented tasks.
+6. Title must be short, factual, and in the spoken language.`;
 
-    let userPrompt = normalizeText(promptOverride, 20_000) || "Realiza una transcripción precisa de este audio y presenta notas estructuradas en el mismo idioma en que se habla.";
+    let userPrompt = normalizeText(promptOverride, 20_000) || "Transcribe literalmente este audio. Devuelve texto con marcas de tiempo [MM:SS]. No inventes palabras; usa [inaudible] si no se entiende.";
     if (liveDraft.length > 0) {
-      userPrompt += `\n\nReference Live Speech Draft for context and text correction:\n"""\n${liveDraft}\n"""\nUse the above draft to correct spelling of names or terms, alignment, and format the official transcription with precise timestamps from the audio file.`;
+      userPrompt += `
+
+Reference local draft, only as weak context. It may contain errors:
+"""
+${liveDraft}
+"""
+Use the audio as the source of truth. Correct the draft only when the audio supports it.`;
     }
 
     const response = await ai.models.generateContent({
@@ -622,7 +632,7 @@ Specifically, generate:
             },
             transcript: {
               type: Type.STRING,
-              description: "Full, precise, verbatim transcript of everything spoken in the audio, formatted with detailed chronological [MM:SS] speaker labels.",
+              description: "Full, precise, literal transcript of the audio, formatted with chronological [MM:SS] timestamps. Do not invent speaker labels.",
             },
             summary: {
               type: Type.STRING,
